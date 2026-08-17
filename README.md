@@ -284,16 +284,34 @@ campaign-group-predictor/
 │       ├── evaluation.py     # metrics + business lift (ML Q1 and Q3)
 │       ├── diagnostics.py    # learning curve, operating points, ablation, ensembling
 │       └── train.py          # training CLI
-├── frontend/app.py           # Streamlit UI
-├── tests/                    # unit + API tests
-├── docs/                     # architecture.md, validation_plan.md, model_card.md
-├── notebooks/01_analysis.ipynb   # the analysis narrative, reproducible end to end
-├── reports/                  # REPORT.md, findings.json, figures/
+├── frontend/app.py           # Streamlit UI - a thin client, no business logic
+├── tests/                    # 402 tests across 17 modules
+├── docs/                     # architecture.md, validation_plan.md, model_card.md, WALKTHROUGH.md
+├── notebooks/
+│   ├── 01_analysis.ipynb     # the analysis narrative, reproducible end to end
+│   └── analysis_support.py   # presentation helpers - NOT in src/, see below
+├── reports/                  # REPORT.md, findings.json, figures/, PEER_REVIEW_SUMMARY.md
 ├── artifacts/                # model.pkl, metrics.json (git-ignored)
 ├── data/                     # customerGroups.csv (git-ignored, confidential)
 ├── Dockerfile / Dockerfile.frontend / cloudbuild.frontend.yaml
-└── .github/workflows/ci.yml
+├── terraform/                # Cloud Run, IAM, Artifact Registry
+└── .github/workflows/        # ci.yml (push/PR) + deploy.yml (manual)
 ```
+
+**Why `analysis_support.py` sits in `notebooks/` and not `src/`.** It holds the notebook's
+presentation helpers — table formatting, chart assembly — and imports matplotlib, seaborn and
+`IPython.display`. Three consequences follow, in order of how much they matter:
+
+1. `src/` is the **deployed** package. `requirements-serve.txt` ships scikit-learn, pandas and
+   FastAPI and nothing else. If these helpers lived in `src/`, the API could import a
+   dependency the container does not have — a failure that appears only at runtime, in
+   production.
+2. Coverage is measured on `src/` against a `fail_under` floor. Adding several hundred lines
+   of chart formatting would either break the gate or force tests asserting the colour of a
+   heatmap.
+3. `.gcloudignore` excludes `notebooks/`, so none of it reaches the serving image.
+
+The boundary is *product code versus analysis code*, not *importable Python versus scripts*.
 
 ### Decision-support diagnostics
 
@@ -694,9 +712,38 @@ confidential CSV never leaves the local machine. Only the trained model artifact
 |---|---|---|
 | `MODEL_PATH` | `artifacts/model.pkl` | Artifact location |
 | `MODEL_TYPE` | `sklearn_pipeline` | Registered predictor name |
-| `ALLOW_BASELINE_FALLBACK` | `true` | Degrade to baseline instead of failing. Set `false` in production. |
+| `ALLOW_BASELINE_FALLBACK` | **`false`** | **Fail closed.** See below |
+| `AUTOMATION_CONFIDENCE_THRESHOLD` | `0.0` (disabled) | Minimum probability to decide automatically. **Set to `0.60` in deployment** — a fitted parameter, not a constant |
+| `EXPLORATION_RATE` | `0.0` (off) | Fraction of decline recommendations overridden so outcomes stay observable |
+| `ENABLE_DECISION_LAYER` | `true` | Attach the cost-sensitive recommendation |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
+| `JSON_LOGS` | auto | Structured JSON on Cloud Run (via `K_SERVICE`), plain text locally |
+| `ALLOWED_ORIGINS` | `*` | CORS. Credentials are disabled while this is `*` |
 | `API_BASE_URL` | `http://localhost:8000` | Backend URL used by the frontend |
+
+**Three defaults are deliberately conservative, and each is a decision rather than a
+convention:**
+
+`ALLOW_BASELINE_FALLBACK=false` — a missing or unreadable artifact prevents startup rather
+than degrading to the majority-class baseline. This default was **changed** after the
+deployed service was found serving the baseline through three consecutive "successful"
+deploys: a malformed `--set-env-vars` argument folded two variables into one, `MODEL_PATH`
+pointed at a path that did not exist, and a permissive default let the container start anyway
+and return confident majority-class predictions. *A fallback that engages by default converts
+a loud failure into a quiet wrong answer.* Local development and CI set it `true`
+explicitly, because neither has a trained model.
+
+`AUTOMATION_CONFIDENCE_THRESHOLD=0.0` — the gate is **off** in code. 0.60 is a *fitted
+parameter* selected on the calibration split for one specific artifact; hard-coding it here
+would silently apply one model's operating point to a different model. The deployment sets
+it, and it must be re-derived from `findings.json["automation_gate"]["threshold"]` after every
+retrain.
+
+`EXPLORATION_RATE=0.0` — exploration spends real budget on knowingly sub-optimal campaigns.
+That can be an excellent investment, but shipping `0.05` would quietly commit a marketing team
+to misallocating one campaign in twenty. It is a required, explicit input; see
+`docs/validation_plan.md` §5.1 for the trade-off. Note that inverse-propensity evaluation is
+**undefined** at zero, so this must be set before offline policy evaluation is possible.
 
 ---
 
