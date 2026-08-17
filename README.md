@@ -163,8 +163,21 @@ remembering a module path — the same interface a developer uses and a schedule
 call:
 
 ```bash
-campaign-train --data data/customerGroups.csv --out artifacts
+campaign-train --data data/customerGroups.csv --out artifacts \
+    --calibrate --holdout-seed 20260819
 ```
+
+**The two flags are not optional.** `--holdout-seed` fixes *which* campaigns are held out —
+omitting it falls back to 42 and produces a different test set, and therefore different
+accuracy, lift, class-0 recall and symmetry figures. `--calibrate` reserves the 1,060-row
+calibration split that makes thresholds and the calibrator selectable without touching test;
+without it the split is 5,296 / – / 1,324 and every reported number shifts.
+
+This is written out because a bare `--data ... --out artifacts` once overwrote the canonical
+artifact with a differently-split experiment, and the deployed service then served a model
+whose accuracy matched no document describing it. `make train` carries the flags; verify with
+`make verify-artifact`, which asserts the artifact on disk is the documented run and exits
+non-zero otherwise.
 
 ### Dependency files
 
@@ -178,11 +191,29 @@ installing the package should not receive JupyterLab; a contributor should.
 | `pyproject.toml` | `pip install .` | Runtime dependencies and optional extras |
 | `requirements.txt` | Development | Notebook, frontend, tests, linters |
 | `requirements-serve.txt` | **The API container** | Only what the service imports |
-| `requirements-optional.txt` | Full model zoo | CatBoost, LightGBM, XGBoost, SHAP — all guarded imports |
+| `requirements-optional.txt` | Full model zoo + tracking | CatBoost, LightGBM, XGBoost, SHAP, MLflow — all guarded imports |
 
 The API image installs **only** `requirements-serve.txt`. JupyterLab, Streamlit, matplotlib
 and pytest have no role in answering a prediction, and shipping them costs image size,
 Cloud Run cold-start latency and CVE surface for code the process never loads.
+
+**Pinning is selective, not uniform.** The question worth asking of each dependency is *what
+must this be identical to?* — and only the four that deserialise the pickle have to be
+identical to anything:
+
+| Packages | Constraint | Why |
+|---|---|---|
+| `scikit-learn`, `numpy`, `scipy`, `joblib` | **`==` exact** | These unpickle the model. A minor bump can change an estimator's internal layout, and the failure mode is the worst available: the image builds, the container starts, `/health` passes, and the **first prediction** fails |
+| `pandas` | `~=` compatible | Used by the feature adapter, not by the pickle |
+| `fastapi`, `uvicorn`, `pydantic` | `>=,<` ranges | The HTTP layer never touches the artifact. Pinning it exactly buys no safety and declines security patches in the component most exposed to the internet |
+
+The container also runs **Python 3.12** to match the interpreter that produced
+`artifacts/model.pkl`. Serving on 3.11 while training on 3.12 worked, but by luck rather than
+design — a pickle carries references to the classes that created it.
+
+`metrics.json` records these versions in an `environment` block. That duplicates the artifact
+deliberately: reading them from the artifact requires unpickling it, which needs the very
+libraries you are trying to identify — circular exactly when it matters.
 
 > **If you retrain and the champion changes family**, a pickled CatBoost/LightGBM/XGBoost
 > pipeline cannot be unpickled without its library. Add the matching line to
@@ -502,8 +533,24 @@ curl -X POST http://localhost:8000/predict \
 }
 ```
 
-All 20 / 20 / 27 keys are required. Missing, unexpected, or post-campaign keys return
-`422` with an explanatory `detail`. A `null` value is accepted and imputed.
+All 20 / 20 / 27 keys are required. The schema rejects, with `422` and a reason naming the
+offending field:
+
+| Input | Why |
+|---|---|
+| Missing, unexpected, or post-campaign keys | The contract is exact; a silently ignored `g1_21` would let a caller believe a post-campaign value was used |
+| `NaN` | Indistinguishable from `null` downstream but arrives by a different path — usually a failed upstream computation. A caller should have one *deliberate* way to say "no value" |
+| `±inf`, or `\|value\| > 1e6` | Finite-but-implausible values pass every type check and overflow during standardisation. Without this the caller receives a `500` for what is unambiguously a client error |
+| More than **20%** of the 67 features `null` | The median imputer fills every gap confidently, so a request of 67 nulls would return a well-formed prediction with a confidence score — built entirely from training medians. **A campaign must never be approved from an empty request** |
+
+A `null` value is accepted and imputed **below** that threshold; sparse gaps are what the
+imputer is for.
+
+```bash
+# Verifiable against the live service:
+#   422 - "67 of 67 features are null, above the limit of 13 (20%)"
+#   422 - "g1_1 = 1e+308 exceeds the plausible range (|value| <= 1e+06)"
+```
 
 Generate a complete example body with:
 
@@ -560,18 +607,40 @@ the image assembles, not that it boots.
 ### Running tests locally
 
 ```bash
-pytest                       # full suite with coverage
-pytest tests/test_api.py -v  # one module
+pytest                                  # full suite with the coverage floor
+pytest tests/test_api.py -v --no-cov    # one module (--no-cov: 30 tests cannot reach 90%)
 pytest --cov=src --cov-report=html && open htmlcov/index.html
 ```
 
+**402 tests across 17 modules, 92.4% branch coverage** against `fail_under = 90` in
+`pyproject.toml` — so the gate behaves identically on a laptop and in CI.
+
 Covered: feature engineering arithmetic, leakage removal, payload validation and every
 rejection path, predictor strategies, artifact loading and corruption handling, factory
-registration, registry singleton semantics and fallback behaviour, evaluation and lift
-maths, and all API endpoints including error codes.
+registration, registry semantics and fallback behaviour, evaluation and lift maths,
+structured logging, tracking degradation, and all API endpoints including error codes.
 
 Tests use a small synthetic dataset with the real column contract, so the suite is fast,
-deterministic, and ships no proprietary data.
+deterministic, and ships no proprietary data. That is not only convenience — the real
+dataset is never committed, so **CI has nothing to train on by design**, and the fixtures are
+what make the code verifiable by a machine that is not permitted to see the data.
+
+**Three tests worth singling out**, because they assert properties rather than return values:
+
+- `test_only_the_champion_is_evaluated_on_the_test_set` — fails if `predict(x_test)` is
+  reintroduced into the candidate loop. That is how the property was lost the first time, so
+  it is now a mechanism rather than a sentence in a report.
+- `test_exploration_works_across_separate_single_row_calls` — the service handles **one**
+  campaign per request. Every earlier exploration test passed a batch, which is precisely why
+  a bug that disabled exploration entirely for single requests survived.
+- `TestUnhandledExceptions` — asserts a `500` carries `X-Request-ID` and does **not** echo the
+  underlying exception message. Writing it found that the correlation ID was present on every
+  successful response and missing on exactly the responses a caller would need it for.
+
+`src/training/train.py` is the weakest module at **72%**: the untested paths are the
+calibration branch and MLflow logging, which need a full training run rather than the
+`--fast` smoke runs the suite uses. It is included in the measurement — an earlier version
+excluded it, which made the headline number flattering.
 
 ---
 
