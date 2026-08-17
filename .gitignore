@@ -36,6 +36,12 @@ notebooks/Backup.ipynb
 notebooks/*-checkpoint.ipynb
 notebooks/convert.ipynb
 
+# Release archives. `scripts/build_release.py` regenerates dist/ from the working tree, so
+# committing it would store a second copy of the 59 MB model artifact inside git history -
+# permanently, since history is not rewritable in practice. The zip is a build output; the
+# repository is the source.
+dist/
+
 # MLflow local tracking store. Run history belongs in a tracking server, not in git -
 # committing it would put binary model copies in every clone.
 mlruns/
