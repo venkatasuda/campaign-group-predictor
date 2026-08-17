@@ -226,7 +226,8 @@ def main() -> int:
 
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path in paths:
-            archive.write(PROJECT_ROOT / path, arcname=f"campaign-group-predictor/{path.as_posix()}")
+            arcname = f"campaign-group-predictor/{path.as_posix()}"
+            archive.write(PROJECT_ROOT / path, arcname=arcname)
 
     manifest = PROJECT_ROOT / args.manifest
     manifest.write_text(

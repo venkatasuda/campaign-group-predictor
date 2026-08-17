@@ -30,7 +30,7 @@ targeting at all.
 
 | Challenge item | Where |
 |---|---|
-| ML Q1 — outcome percentages | `notebooks/01_eda.ipynb`, `artifacts/metrics.json`, `src/training/evaluation.py::campaign_outcome_distribution` |
+| ML Q1 — outcome percentages | `notebooks/01_analysis.ipynb`, `artifacts/metrics.json`, `src/training/evaluation.py::campaign_outcome_distribution` |
 | ML Q2 — predictive model | `src/training/`, `src/predictors.py` |
 | ML Q3 — lift + validation | `docs/validation_plan.md`, `src/training/evaluation.py::estimate_business_lift` |
 | Eng 1 — architecture + sequence diagrams | `docs/architecture.md` |
@@ -147,6 +147,18 @@ overrides it silently. Once a confidential file reaches history, removing it mea
 rewriting every commit after it and treating the contents as disclosed regardless, because
 anyone who cloned in between still has it. The same check runs in CI, so it holds for
 anyone who did not install the hooks.
+
+**What this check does not do, stated precisely.** It inspects `git diff --cached` — the
+**staged** changes of the commit being made. It therefore does *not* scan the working tree,
+does *not* audit existing history, and does *not* inspect a release archive. Running it in a
+repository where `data/customerGroups.csv` merely *exists* will pass, correctly, because
+nothing is staged.
+
+That distinction matters because relying on it for more than it does is exactly how the
+dataset reached a submission archive: the commit guard held, and the packaging step had no
+guard at all. Archive safety is a separate mechanism — `scripts/build_release.py` builds from
+an **allowlist** and refuses to write if any `.csv` outside three named derived tables appears
+in the manifest.
 
 ### Installing as a package
 
@@ -606,7 +618,7 @@ curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -
 
 | Job | What it does |
 |---|---|
-| **data-guard** | Asserts the confidential dataset is absent from the tree **and from git history**. Runs first — if this fails, no other result matters |
+| **data-guard** | Runs `scripts/check_no_data_committed.py`, which refuses a commit whose **staged** changes include the dataset or another blocked path. Runs first — if this fails, no other result matters |
 | **lint** | `ruff`, `black --check`, `mypy` |
 | **test** | `pytest` with the branch-coverage floor from `pyproject.toml`, optional model libraries installed so the guarded import paths are exercised rather than skipped |
 | **security** | `pip-audit` against the **serving** requirements, `bandit -ll` |

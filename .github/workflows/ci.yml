@@ -35,21 +35,44 @@ jobs:
   # Runs first and alone. If confidential data has reached the repository, nothing else
   # about this commit matters - and the answer is needed before anyone reads a test result.
   data-guard:
-    name: No confidential data committed
+    name: No confidential data in the repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # The check inspects history, not just the working tree: deleting a file in a
-          # later commit does not remove it from earlier ones, and a clone still carries it.
+          # Full history, because the tracked-file scan below asks what the repository
+          # contains rather than what this commit changed. Deleting a file in a later commit
+          # does not remove it from earlier ones, and a clone still carries it.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Assert the dataset is absent from the tree and from history
+      # Two checks, because they answer different questions and only one of them was
+      # previously being run.
+      #
+      # `check_no_data_committed.py` is a PRE-COMMIT hook: it inspects `git diff --cached`
+      # and refuses a commit that stages a blocked path. In CI nothing is staged, so on its
+      # own it passes trivially - which is how the dataset once reached a release archive
+      # while every guard reported green.
+      - name: Blocked paths are not staged
         run: python scripts/check_no_data_committed.py
+
+      - name: No dataset is tracked anywhere in the repository
+        run: |
+          tracked=$(git ls-files '*.csv' | grep -v '^reports/' || true)
+          if [ -n "$tracked" ]; then
+            echo "::error::Confidential or unexpected CSV files are tracked:"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "No tracked CSV outside reports/."
+
+      - name: Release archive builds without confidential content
+        run: |
+          python -m pip install --upgrade pip
+          python scripts/build_release.py --dry-run
 
   # ------------------------------------------------------------------------------ quality
   lint:
