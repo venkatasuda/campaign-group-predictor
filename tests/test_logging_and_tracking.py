@@ -153,6 +153,10 @@ class _StubMlflow:
         self.metrics: dict[str, float] = {}
         self.params: dict[str, str] = {}
         self.tags: dict[str, str] = {}
+        self.artifacts: list[str] = []
+
+    def log_artifact(self, path: str) -> None:
+        self.artifacts.append(path)
 
     def log_metrics(self, values: dict[str, float]) -> None:
         self.metrics.update(values)
@@ -185,6 +189,75 @@ class TestTrackingDegradesGracefully:
         monkeypatch.setattr(tracking, "_mlflow", lambda: None)
         assert tracking.start_training_run("run") is None
         assert tracking.is_available() is False
+
+
+class TestArtifactLogging:
+    """``log_artifact`` attaches a file that exists and stays silent about one that does not.
+
+    The missing-file case is not defensive padding. ``train()`` logs ``metrics.json`` right
+    after writing it, and a run configured with ``--fast`` or interrupted before that write
+    would otherwise raise from the tracking layer - which is precisely the failure mode the
+    module promises not to have.
+    """
+
+    def test_an_existing_file_is_attached(self, tmp_path) -> None:
+        stub = _StubMlflow()
+        path = tmp_path / "metrics.json"
+        path.write_text("{}", encoding="utf-8")
+
+        tracking.log_artifact(stub, path)
+
+        assert stub.artifacts == [str(path)]
+
+    def test_a_missing_file_is_skipped_silently(self, tmp_path) -> None:
+        stub = _StubMlflow()
+
+        tracking.log_artifact(stub, tmp_path / "never-written.json")
+
+        assert stub.artifacts == []
+
+
+class TestModelLogging:
+    """``log_model`` uses the cloudpickle flavour, and never propagates a failure.
+
+    Patching ``mlflow.sklearn.log_model`` rather than starting a run: the function under test
+    takes the handle only to decide whether tracking is active, and reaches the real
+    ``mlflow.sklearn`` module by import. So the behaviour is fully exercisable without a
+    tracking backend, a run, or a byte written to disk.
+    """
+
+    def test_serialises_with_cloudpickle(self, monkeypatch) -> None:
+        mlflow_sklearn = pytest.importorskip("mlflow.sklearn")
+        recorded: dict[str, Any] = {}
+
+        def fake_log_model(pipeline: Any, *, name: str, serialization_format: str) -> None:
+            recorded.update(pipeline=pipeline, name=name, serialization_format=serialization_format)
+
+        monkeypatch.setattr(mlflow_sklearn, "log_model", fake_log_model)
+        pipeline = object()
+
+        tracking.log_model(_StubMlflow(), pipeline, name="champion")
+
+        assert recorded["pipeline"] is pipeline
+        assert recorded["name"] == "champion"
+        # Not the default serialiser: it refuses PairwiseFeatureBuilder, because
+        # deserialising an arbitrary class is arbitrary code execution.
+        assert recorded["serialization_format"] == mlflow_sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE
+
+    def test_a_serialisation_failure_never_reaches_the_caller(self, monkeypatch, caplog) -> None:
+        """The guarantee that matters: a training run that has already written a valid
+        artifact to disk must not fail because the tracking layer could not serialise it."""
+        mlflow_sklearn = pytest.importorskip("mlflow.sklearn")
+
+        def explode(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("unserialisable estimator")
+
+        monkeypatch.setattr(mlflow_sklearn, "log_model", explode)
+
+        with caplog.at_level(logging.WARNING):
+            tracking.log_model(_StubMlflow(), object())
+
+        assert "Training is unaffected" in caplog.text
 
 
 class TestTrackingUriPrecedence:
