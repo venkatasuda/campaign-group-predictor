@@ -14,6 +14,7 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from src import tracking
 from src.api.main import create_app
 from src.config import Settings
 from src.constants import (
@@ -102,6 +103,53 @@ def clean_registry() -> Any:
     ModelRegistry.reset_instance()
     yield
     ModelRegistry.reset_instance()
+
+
+@pytest.fixture(autouse=True)
+def no_mlflow_tracking(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run the suite with experiment tracking switched off.
+
+    Without this, every test that calls ``train()`` logs into the developer's REAL tracking
+    store - ``sqlite:///mlflow.db`` and ``./mlruns/`` in the repository root - because that is
+    ``DEFAULT_TRACKING_URI`` and the tests never override it.
+
+    Three separate problems, in increasing order of seriousness:
+
+    1. **The store grows without bound.** Each training test writes ~100 metric rows, a run
+       directory, and a pickled model. Repeated over a week of development this reached
+       297 MB of ``mlruns/`` plus a 21 MB ``mlflow.db``, and contributed to filling the disk -
+       at which point pytest failed with ``sqlite3.OperationalError: database or disk is
+       full`` and pandas with ``[Errno 28]``, in two tests that had nothing to do with either.
+
+    2. **Test runs pollute real experiment history.** Runs trained on the 300-row synthetic
+       fixture sit in the same experiment as runs trained on the actual dataset, with
+       plausible-looking metrics. Anyone reading that dashboard to compare champions is
+       reading a mix of two different things.
+
+    3. **Tests are not hermetic.** A suite whose result depends on free space in a directory
+       outside the test environment is not reproducible, and it fails confusingly.
+
+    Disabling the layer rather than redirecting it, after two redirections failed:
+
+    - A **tmp SQLite URI** relocates run metadata but not artifacts. ``train.py`` calls
+      ``log_artifact`` and ``log_model``, and with a database-backed store MLflow still
+      resolves the artifact root to ``./mlruns`` relative to the working directory - so the
+      pickled models keep landing in the repository.
+    - A **tmp file-store URI** relocates both, but MLflow now refuses it outright:
+      ``MlflowException: The filesystem tracking backend ... is in maintenance mode``. Opting
+      back in via ``MLFLOW_ALLOW_FILE_STORE`` would pin the suite to a deprecated backend.
+
+    ``_mlflow()`` returning ``None`` is the module's own documented degradation path - the
+    same one that runs when MLflow is not installed, and the one
+    ``TestTrackingDegradesGracefully`` already covers. Every ``tracking.*`` entry point
+    no-ops, so ``train()`` is exercised end to end with nothing written anywhere.
+
+    This does not reduce coverage: the MLflow logging branch in ``train()`` was never
+    asserted on, only executed for its side effects, and README already records it as one of
+    the untested paths in that module. Tracking behaviour itself is covered by the stub-based
+    tests in ``test_logging_and_tracking.py``, which do not touch a real backend.
+    """
+    monkeypatch.setattr(tracking, "_mlflow", lambda: None)
 
 
 @pytest.fixture

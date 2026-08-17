@@ -148,6 +148,24 @@ resource "google_cloud_run_v2_service" "api" {
       max_instance_count = var.api_max_instances
     }
 
+    # Concurrency is set explicitly, and low, because of what the container holds.
+    #
+    # Cloud Run defaults to 80 simultaneous requests per instance. That is right for an
+    # I/O-bound service that spends its time waiting on a database. This one is CPU-bound:
+    # every request runs a 400-tree random forest, and the container is limited to ONE vCPU.
+    # Eighty concurrent inferences on one core do not run faster - they queue while
+    # contending, and tail latency degrades far more than throughput improves.
+    #
+    # The value pairs with `n_jobs=1` on the estimator (see src/training/pipeline.py). Those
+    # two settings have to be chosen together: `n_jobs=-1` with high concurrency means each
+    # request spawns workers for cores that do not exist, and the oversubscription is
+    # invisible in single-request benchmarking - which is exactly how it reached production.
+    #
+    # 8 is a starting point, not a measurement. The honest way to set it is a load test at
+    # the target p95, which this project has not run; the number is deliberately
+    # conservative so the failure mode is queueing rather than thrashing.
+    max_instance_request_concurrency = var.api_max_concurrency
+
     containers {
       image = var.api_image
 

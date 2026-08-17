@@ -76,6 +76,33 @@ variable "allow_baseline_fallback" {
   default     = false
 }
 
+variable "api_max_concurrency" {
+  description = <<-EOT
+    Simultaneous requests one API instance will accept.
+
+    Cloud Run's default is 80, which suits an I/O-bound service waiting on a database. This
+    service is CPU-bound - every request runs a 400-tree random forest - and the container
+    has one vCPU. High concurrency on one core does not increase throughput; it queues
+    requests while they contend, and tail latency suffers far more than throughput gains.
+
+    Must be chosen together with the estimator's n_jobs (set to 1 in
+    src/training/pipeline.py). n_jobs=-1 combined with high concurrency spawns workers for
+    cores that do not exist, and the oversubscription does not appear in single-request
+    benchmarking.
+
+    8 is conservative rather than measured. Setting it properly requires a load test at the
+    target p95, which this project has not run - so the value errs toward queueing rather
+    than thrashing, and is recorded as an assumption rather than a result.
+  EOT
+  type        = number
+  default     = 8
+
+  validation {
+    condition     = var.api_max_concurrency >= 1 && var.api_max_concurrency <= 80
+    error_message = "Concurrency must be between 1 and 80 (the Cloud Run maximum)."
+  }
+}
+
 variable "automation_confidence_threshold" {
   description = <<-EOT
     Minimum predicted probability required to decide a campaign automatically. Below it the

@@ -139,6 +139,32 @@ jobs:
           path: coverage.xml
           if-no-files-found: warn
 
+  # Infrastructure is code, so it is checked like code. `terraform validate` catches syntax
+  # errors, unknown attributes and type mismatches without touching cloud state or needing
+  # credentials - the same class of error that a linter catches in Python, and previously the
+  # only part of this repository with no automated check at all.
+  terraform:
+    name: Terraform format and validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - name: Format check
+        run: terraform -chdir=terraform fmt -check -recursive
+
+      # -backend=false because validation needs the provider schemas, not the remote state.
+      # Initialising a real backend would require credentials this job deliberately does not
+      # have.
+      - name: Init without a backend
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Validate
+        run: terraform -chdir=terraform validate
+
   security:
     name: Security
     runs-on: ubuntu-latest

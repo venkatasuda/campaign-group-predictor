@@ -35,6 +35,7 @@ thing it observes is a liability.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -122,7 +123,19 @@ def start_training_run(
         )
         return None
 
-    mlflow.set_tracking_uri(tracking_uri or DEFAULT_TRACKING_URI)
+    # Precedence: explicit argument, then MLFLOW_TRACKING_URI, then the local default.
+    #
+    # The middle term was missing. This module's docstring says "point MLFLOW_TRACKING_URI at
+    # a shared server and the same code logs there instead - that is the migration", but
+    # `tracking_uri or DEFAULT_TRACKING_URI` overwrote the environment variable with the
+    # hardcoded local SQLite path on every call. MLflow reads that variable itself; calling
+    # set_tracking_uri unconditionally is what silenced it.
+    #
+    # So the documented migration path did not work, and it failed in the quiet direction: a
+    # team pointing at a shared server would get a successful run logged to a file on the
+    # training machine, with no error and an empty shared dashboard.
+    resolved_uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI") or DEFAULT_TRACKING_URI
+    mlflow.set_tracking_uri(resolved_uri)
     mlflow.set_experiment(experiment)
 
     run = mlflow.start_run(run_name=run_name)

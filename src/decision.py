@@ -264,9 +264,35 @@ class DecisionPolicy:
         # inverse-propensity evaluation described in docs/validation_plan.md 5.1 has no
         # positivity and is undefined rather than merely noisy.
         #
+        # KNOWN LIMITATION - the stream is identical in every container, and this is not
+        # fixed here.
+        #
+        # Moving the generator out of `decide_batch` made exploration work *within* one
+        # process. It does not make the fleet behave correctly: Cloud Run runs several
+        # instances, each constructs this policy from the same `exploration_seed`, and each
+        # therefore draws the same sequence. Every instance explores on its own 1st, 17th,
+        # 43rd request, so exploration correlates with position-in-instance rather than being
+        # independent across campaigns.
+        #
+        # For inverse-propensity evaluation that is worse than it sounds. IPS assumes the
+        # exploration draw is independent given the context; correlated draws mean the
+        # realised propensity is not the configured rate, and the estimator is biased while a
+        # simple exploration *count* still looks correct.
+        #
+        # Why it is not fixed by mixing in OS entropy: that would make the stream
+        # unreproducible, and reproducibility is what lets a logged decision be replayed.
+        # The correct fix is to derive the draw from the decision itself - a stable hash of
+        # `decision_id` - so it is independent across instances *and* replayable from the
+        # log. That requires threading `decision_id` into this method, which requires the
+        # prediction-logging schema in docs/validation_plan.md 5.1 to exist first.
+        #
+        # It is a latent rather than an active fault: `exploration_rate` defaults to 0.0, so
+        # nothing explores until someone deliberately enables it - and enabling it is exactly
+        # the moment this must be fixed. Recorded in the limitations rather than papered over.
+        #
         # `object.__setattr__` because the dataclass is frozen: the generator is internal
-        # mutable state, not part of the policy's declared configuration, and equality and
-        # reproducibility still derive from `exploration_seed`.
+        # mutable state, not declared configuration, and equality still derives from
+        # `exploration_seed`.
         object.__setattr__(self, "_rng", np.random.default_rng(self.exploration_seed))
 
     def reset_exploration_stream(self) -> None:

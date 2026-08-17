@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from src.api.main import create_app
 from src.config import Settings
 from src.constants import LEAKAGE_FEATURES
+from src.predictors import MajorityClassPredictor
 
 
 class TestOperationsEndpoints:
@@ -100,6 +101,121 @@ class TestPredictEndpoint:
     ) -> None:
         valid_payload["comparison"]["c_1"] = None
         assert client.post("/predict", json=valid_payload).status_code == 200
+
+
+class TestLivenessAndReadiness:
+    """Two probes, because an orchestrator reacts to them differently.
+
+    A failed liveness probe means *restart this container*. A failed readiness probe means
+    *stop sending it traffic*. Conflating them makes both wrong: a liveness check that also
+    verifies the model would restart a container whose only problem is a missing artifact,
+    producing a crash loop that fixes nothing.
+    """
+
+    def test_live_reports_alive_even_without_a_model(self, client: TestClient) -> None:
+        """The fixture points at a missing artifact, so the baseline is loaded.
+
+        Liveness must still be 200: the process is running, and restarting it would not
+        produce a model.
+        """
+        response = client.get("/live")
+        assert response.status_code == 200
+        assert response.json()["status"] == "alive"
+
+    def test_ready_returns_503_when_serving_the_baseline(self, client: TestClient) -> None:
+        """The status code is the whole point of this endpoint.
+
+        `/health` reports `degraded` inside a 200 because it is read by humans. A load
+        balancer reads only the code, so a degraded instance answering 200 keeps receiving
+        traffic it should not have.
+        """
+        response = client.get("/ready")
+        assert response.status_code == 503
+        assert response.json()["ready"] is False
+        assert "baseline" in response.json()["reason"]
+
+    def test_ready_returns_200_with_a_real_model(self, tmp_path) -> None:
+        from fastapi.testclient import TestClient as Client
+
+        from src.api.dependencies import get_registry
+        from src.api.main import create_app
+        from src.config import Settings
+
+        class _RealModelStub:
+            """Stands in for a loaded artifact.
+
+            Written as a plain stub rather than by mutating a MajorityClassPredictor:
+            `metadata` on the real predictors is a property that rebuilds its dict on each
+            access, so assigning into it has no effect and the object stays flagged as a
+            baseline. An earlier version of this test did exactly that and asserted 200
+            against an instance that was still, correctly, reporting 503.
+            """
+
+            metadata = {"is_baseline": False, "predictor": "sklearn_pipeline"}
+
+        class _ReadyRegistry:
+            is_loaded = True
+            predictor = _RealModelStub()
+
+        app = create_app(
+            Settings(model_path=str(tmp_path / "missing.pkl"), allow_baseline_fallback=True)
+        )
+        app.dependency_overrides[get_registry] = lambda: _ReadyRegistry()
+        with Client(app) as ready_client:
+            response = ready_client.get("/ready")
+        app.dependency_overrides.clear()
+
+        assert response.status_code == 200
+        assert response.json()["ready"] is True
+
+
+class TestStartupCanary:
+    """Loading an artifact and being able to predict with it are different properties."""
+
+    def test_a_broken_real_model_prevents_startup(self, tmp_path) -> None:
+        """A pickle can deserialise cleanly and still fail on the first request.
+
+        Without the canary that failure lands on a real caller, after the container has
+        passed its readiness probe and been given traffic. With it, the instance refuses to
+        start and Cloud Run keeps the previous revision serving.
+        """
+        import pytest
+
+        from src.api.main import _run_startup_canary
+        from src.config import Settings
+
+        class _BrokenPredictor:
+            metadata = {"is_baseline": False, "predictor": "sklearn_pipeline"}
+
+            def predict(self, frame):
+                raise ValueError("feature names mismatch")
+
+        with pytest.raises(RuntimeError, match="could not produce a prediction"):
+            _run_startup_canary(_BrokenPredictor(), Settings())
+
+    def test_a_broken_baseline_does_not_prevent_startup(self, tmp_path) -> None:
+        """The asymmetry is deliberate.
+
+        The baseline exists for environments with no artifact - CI, local development.
+        Crashing the container when it fails would break the case the fallback was built to
+        serve.
+        """
+        from src.api.main import _run_startup_canary
+        from src.config import Settings
+
+        class _BrokenBaseline:
+            metadata = {"is_baseline": True, "predictor": "majority_class"}
+
+            def predict(self, frame):
+                raise ValueError("no")
+
+        _run_startup_canary(_BrokenBaseline(), Settings())  # must not raise
+
+    def test_a_working_model_passes(self) -> None:
+        from src.api.main import _run_startup_canary
+        from src.config import Settings
+
+        _run_startup_canary(MajorityClassPredictor(majority_class=1), Settings())
 
 
 class TestUnhandledExceptions:

@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from time import perf_counter
+from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, status
@@ -109,6 +110,54 @@ def _register_exception_handlers(app: FastAPI) -> None:
         )
 
 
+def _run_startup_canary(predictor: Any, settings: Settings) -> None:
+    """Score one synthetic campaign through the full pipeline before accepting traffic.
+
+    The payload is built from ``src.constants`` rather than hardcoded, so it exercises the
+    real 67-column contract. If a feature is added, the canary carries it automatically
+    instead of silently testing an outdated shape.
+
+    Failure behaviour depends on what is loaded, and the asymmetry is deliberate:
+
+    * A **real artifact** that cannot predict is a broken deployment. Raise, so the container
+      never becomes ready and Cloud Run keeps the previous revision serving traffic.
+    * The **baseline fallback** failing is logged, not raised. The fallback exists precisely
+      for environments with no model - CI, local development - and crashing the container
+      there would break the case it was built to serve.
+    """
+    import pandas as pd
+
+    from src.constants import BASE_FEATURES
+
+    is_baseline = bool(predictor.metadata.get("is_baseline", False))
+    probe = pd.DataFrame([dict.fromkeys(BASE_FEATURES, 0.5)])
+
+    try:
+        results = predictor.predict(probe)
+        if not results or results[0].predicted_class not in (0, 1, 2):
+            raise ValueError(f"Canary returned an unusable result: {results!r}")
+    except Exception as error:
+        if is_baseline:
+            logger.warning(
+                "Startup canary failed on the baseline predictor (%s). Continuing, because "
+                "the baseline is what runs where no artifact exists.",
+                error,
+            )
+            return
+        logger.error("Startup canary FAILED: %s", error, exc_info=True)
+        raise RuntimeError(
+            "The model artifact loaded but could not produce a prediction, so this instance "
+            "would fail on its first real request. Refusing to become ready. Original "
+            f"error: {error}"
+        ) from error
+
+    logger.info(
+        "Startup canary passed: predicted class %s with confidence %.3f.",
+        results[0].predicted_class,
+        results[0].confidence,
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and return a configured FastAPI application."""
     settings = settings or get_settings()
@@ -116,9 +165,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        """Load the model once at startup and release it on shutdown."""
+        """Load the model once at startup, prove it works, then serve.
+
+        The canary below is the point. Loading an artifact and *being able to predict with
+        it* are different properties, and only the second one matters. A pickle can
+        deserialise cleanly and still fail on the first request - a feature-name mismatch, a
+        transformer expecting a column the schema no longer sends, an estimator built against
+        a different library version.
+
+        Without the canary that failure surfaces on a real caller's request, after the
+        container has already passed its readiness probe and been given traffic. With it, the
+        instance refuses to start, Cloud Run keeps the previous revision serving, and the
+        failure lands on the deploy rather than on a campaign manager.
+        """
         registry = ModelRegistry()
         predictor = registry.load(settings)
+
+        _run_startup_canary(predictor, settings)
+
         logger.info("Startup complete. Active predictor: %s", predictor.metadata.get("predictor"))
         yield
         registry.reset()
@@ -156,6 +220,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Authorization"],
     )
+
+    # Reject oversized bodies before parsing them.
+    #
+    # `BatchComparisonRequest` caps the batch at 1,000 comparisons, but that limit is
+    # enforced by Pydantic *after* the body has been read and deserialised. A caller sending
+    # a 500 MB payload therefore consumes memory and CPU on a 1-vCPU instance before being
+    # told the batch is too large - the validation is correct and arrives too late to be a
+    # defence.
+    #
+    # 8 MB is generous for the legitimate maximum: 1,000 comparisons x 67 floats is roughly
+    # 1.5 MB of JSON. The limit exists to bound the worst case, not to constrain real use.
+    #
+    # Content-Length can be absent or wrong on a chunked request, so this is a cheap first
+    # filter rather than a complete guard - the real ceiling for an internet-facing service
+    # belongs at the load balancer, where it can be applied before the request reaches the
+    # application at all.
+    max_body_bytes = 8 * 1024 * 1024
+
+    @app.middleware("http")
+    async def _limit_body_size(request: Request, call_next):
+        declared = request.headers.get("content-length")
+        if declared is not None and declared.isdigit() and int(declared) > max_body_bytes:
+            logger.warning(
+                "Rejected an oversized request body: %s bytes on %s",
+                declared,
+                request.url.path,
+                extra={"http_path": request.url.path, "content_length": int(declared)},
+            )
+            return JSONResponse(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                content=ErrorResponse(
+                    error="PayloadTooLarge",
+                    detail=(
+                        f"Request body of {int(declared):,} bytes exceeds the "
+                        f"{max_body_bytes:,}-byte limit. Send at most 1,000 comparisons "
+                        "per batch."
+                    ),
+                ).model_dump(),
+            )
+        return await call_next(request)
 
     # Correlation ID. Every response carries X-Request-ID, and the same value is bound to
     # the log record for the request that produced it.

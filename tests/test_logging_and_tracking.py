@@ -187,6 +187,59 @@ class TestTrackingDegradesGracefully:
         assert tracking.is_available() is False
 
 
+class TestTrackingUriPrecedence:
+    """An explicit argument wins, then MLFLOW_TRACKING_URI, then the local default.
+
+    The middle rule is the one worth testing, because it was broken and broke quietly.
+    ``src/tracking.py`` documents MLFLOW_TRACKING_URI as the whole migration path to a shared
+    server, but the code called ``set_tracking_uri(tracking_uri or DEFAULT_TRACKING_URI)`` -
+    overwriting the variable MLflow would otherwise have honoured. A team pointing at a
+    shared server would have seen a successful training run, no error, and an empty
+    dashboard, because the run landed in a SQLite file on the training machine.
+    """
+
+    class _UriRecorder:
+        def __init__(self) -> None:
+            self.uri: str | None = None
+            self.info = type("Info", (), {"run_id": "0" * 32})()
+
+        def set_tracking_uri(self, uri: str) -> None:
+            self.uri = uri
+
+        def set_experiment(self, name: str) -> None:  # noqa: D102 - stub
+            pass
+
+        def start_run(self, run_name: str) -> Any:
+            return type("Run", (), {"info": self.info})()
+
+        def set_tags(self, values: dict[str, str]) -> None:  # noqa: D102 - stub
+            pass
+
+        def get_tracking_uri(self) -> str | None:
+            return self.uri
+
+    @pytest.fixture
+    def recorder(self, monkeypatch) -> Any:
+        stub = self._UriRecorder()
+        monkeypatch.setattr(tracking, "_mlflow", lambda: stub)
+        return stub
+
+    def test_environment_variable_is_honoured(self, recorder, monkeypatch) -> None:
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.internal:5000")
+        tracking.start_training_run("run")
+        assert recorder.uri == "http://mlflow.internal:5000"
+
+    def test_explicit_argument_beats_the_environment(self, recorder, monkeypatch) -> None:
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", "http://mlflow.internal:5000")
+        tracking.start_training_run("run", tracking_uri="sqlite:///explicit.db")
+        assert recorder.uri == "sqlite:///explicit.db"
+
+    def test_falls_back_to_the_local_default(self, recorder, monkeypatch) -> None:
+        monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+        tracking.start_training_run("run")
+        assert recorder.uri == tracking.DEFAULT_TRACKING_URI
+
+
 class TestMetricFlattening:
     def test_nested_metrics_become_dotted_keys(self) -> None:
         """metrics.json nests per-class scores three deep. Flattening rather than dropping

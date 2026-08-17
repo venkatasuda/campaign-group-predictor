@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 
 from src.api.dependencies import (
     get_app_settings,
@@ -128,6 +130,61 @@ def health(
         model_loaded=registry.is_loaded and not serving_baseline,
         serving_baseline=serving_baseline,
     )
+
+
+@router.get("/live", tags=["operations"], summary="Liveness probe")
+def live() -> dict[str, str]:
+    """Is the process running? Nothing more.
+
+    Deliberately checks nothing except that the event loop can answer. Liveness and readiness
+    answer different questions and an orchestrator responds to them differently: a failed
+    liveness probe means *restart the container*, a failed readiness probe means *stop
+    sending it traffic*.
+
+    Conflating them makes both wrong. A liveness probe that also checks the model would
+    restart a container whose only problem is a missing artifact - producing a crash loop
+    that fixes nothing, because the next container will be missing the same artifact.
+    """
+    return {"status": "alive"}
+
+
+@router.get(
+    "/ready",
+    tags=["operations"],
+    summary="Readiness probe - 503 when the service cannot serve predictions",
+)
+def ready(
+    response: Response,
+    registry: ModelRegistry = Depends(get_registry),
+) -> dict[str, Any]:
+    """Can this instance serve a real prediction right now?
+
+    Returns **503** rather than 200 when it cannot, which is the difference between this and
+    ``/health``. ``/health`` is for humans and dashboards - it reports `degraded` in a 200 so
+    the detail is readable. A readiness probe is consumed by a load balancer that only looks
+    at the status code, so a degraded instance answering 200 keeps receiving traffic it
+    should not receive.
+
+    "Cannot serve" includes serving the majority-class baseline. An instance that answers
+    every request with a 46%-accurate rule is not ready; it is a fallback that should be
+    drained, investigated, and replaced.
+    """
+    serving_baseline = registry.is_loaded and bool(
+        registry.predictor.metadata.get("is_baseline", False)
+    )
+    model_ready = registry.is_loaded and not serving_baseline
+
+    if not model_ready:
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    return {
+        "ready": model_ready,
+        "reason": (
+            "ready"
+            if model_ready
+            else ("serving the majority-class baseline" if serving_baseline else "no model loaded")
+        ),
+    }
 
 
 @router.get(

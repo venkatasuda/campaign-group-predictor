@@ -7,6 +7,7 @@ swapping the champion model - or falling back to a baseline - requires no API ch
 
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -168,6 +169,14 @@ class SklearnPipelinePredictor(BasePredictor):
         self.trained_at = trained_at or datetime.now(timezone.utc).isoformat()
         self.metrics = metrics or {}
 
+        # Lineage, populated by `from_artifact`. Declared here so the attributes always
+        # exist: a predictor constructed directly in a test has them as None rather than
+        # raising AttributeError when /model/info reads them.
+        self.artifact_sha256: str | None = None
+        self.dataset_sha256: str | None = None
+        self.sklearn_version: str | None = None
+        self.holdout_seed: int | None = None
+
     # ---------------------------------------------------------------- construction
 
     @classmethod
@@ -180,6 +189,23 @@ class SklearnPipelinePredictor(BasePredictor):
         artifact_path = Path(path)
         if not artifact_path.exists():
             raise ModelArtifactError(f"Model artifact not found at '{artifact_path}'.")
+
+        # Fingerprint the bytes actually loaded.
+        #
+        # `model_version` is "1.0.0" and stays "1.0.0" across every retrain, so it cannot
+        # answer the question that matters six weeks after a decision: *which artifact
+        # produced this recommendation?* Two builds can carry the same version string, the
+        # same model name and different weights.
+        #
+        # The hash is of the file on disk, computed at load time, so it describes what this
+        # process is actually serving rather than what a build step recorded. Surfaced at
+        # /model/info and logged at startup, which makes a prediction traceable to a
+        # specific file without a model registry existing yet.
+        digest = hashlib.sha256()
+        with artifact_path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+        artifact_sha256 = digest.hexdigest()
 
         try:
             payload = joblib.load(artifact_path)
@@ -196,25 +222,69 @@ class SklearnPipelinePredictor(BasePredictor):
             # attribute defaults change, private internals move. The failure is silent,
             # which is precisely why it is worth announcing at load time rather than
             # trusting a version range in a requirements file.
+            # A MAJOR or MINOR mismatch fails closed; a patch mismatch warns.
+            #
+            # The previous behaviour warned on any difference and loaded anyway. That is the
+            # wrong default for this failure: the container starts, passes its readiness
+            # probe, serves traffic, and returns predictions that are *arithmetically valid
+            # and quietly different* from the ones every number in the report describes.
+            # Nobody notices, because nothing errors.
+            #
+            # The split is deliberate rather than blanket strictness. scikit-learn's own
+            # policy is that pickles are not guaranteed across minor versions - estimator
+            # attributes are added, private internals move - so 1.9 vs 1.8 is a real risk.
+            # Patch releases are bug fixes to the same estimator layout, so 1.9.0 vs 1.9.1
+            # is worth recording and not worth refusing: failing there would block a security
+            # patch for no safety gain, which is the same reasoning that governs how
+            # requirements-serve.txt is pinned.
             trained_with = payload.get("sklearn_version")
             if trained_with and trained_with != sklearn.__version__:
+                trained_series = trained_with.split(".")[:2]
+                running_series = sklearn.__version__.split(".")[:2]
+
+                if trained_series != running_series:
+                    raise ModelArtifactError(
+                        f"Artifact was trained with scikit-learn {trained_with} but "
+                        f"{sklearn.__version__} is installed. Unpickling across minor "
+                        "versions is not guaranteed and can change predictions silently, so "
+                        "this artifact is refused rather than served. Align the serving "
+                        "image with the training environment - the versions are recorded in "
+                        "artifacts/metrics.json under 'environment'."
+                    )
+
                 logger.warning(
-                    "Artifact was trained with scikit-learn %s but %s is installed. "
-                    "Unpickling across versions can change behaviour silently; pin the "
-                    "serving image to the training version.",
+                    "Artifact was trained with scikit-learn %s but %s is installed. Patch "
+                    "versions differ only; loading, but the serving image should match the "
+                    "training environment.",
                     trained_with,
                     sklearn.__version__,
                 )
 
-            return cls(
+            logger.info(
+                "Loaded %s v%s (artifact sha256=%s, dataset sha256=%s, trained %s).",
+                payload.get("model_name", "unknown"),
+                payload.get("model_version", "0.0.0"),
+                artifact_sha256[:16],
+                str(payload.get("dataset_sha256", "unknown"))[:16],
+                payload.get("trained_at", "unknown"),
+            )
+
+            predictor = cls(
                 pipeline=pipeline,
                 model_name=payload.get("model_name", "unknown"),
                 model_version=payload.get("model_version", "0.0.0"),
                 trained_at=payload.get("trained_at"),
                 metrics=payload.get("metrics", {}),
             )
+            predictor.artifact_sha256 = artifact_sha256
+            predictor.dataset_sha256 = payload.get("dataset_sha256")
+            predictor.sklearn_version = trained_with
+            predictor.holdout_seed = payload.get("holdout_seed")
+            return predictor
 
-        return cls(pipeline=payload)
+        predictor = cls(pipeline=payload)
+        predictor.artifact_sha256 = artifact_sha256
+        return predictor
 
     # ------------------------------------------------------------------ inference
 
@@ -242,12 +312,29 @@ class SklearnPipelinePredictor(BasePredictor):
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Describe the deployed model."""
+        """Describe the deployed model, including enough lineage to trace a prediction.
+
+        The ``lineage`` block answers a question ``model_version`` cannot. That string is
+        "1.0.0" on every retrain, so it identifies the *contract*, not the *artifact*. Six
+        weeks after a campaign, "why did it recommend group 2?" needs the specific file:
+        which bytes, trained on which dataset, with which library, under which split seed.
+
+        All four travel with the artifact and are surfaced here rather than living only in a
+        build log, because a build log is a different system that may not still exist.
+        """
         return {
             "predictor": self.name,
             "model_name": self.model_name,
             "model_version": self.model_version,
             "trained_at": self.trained_at,
+            "lineage": {
+                # SHA-256 of the loaded file, computed at load time - so it describes what
+                # this process is serving, not what a build step believed it wrote.
+                "artifact_sha256": self.artifact_sha256,
+                "dataset_sha256": self.dataset_sha256,
+                "sklearn_version": self.sklearn_version,
+                "holdout_seed": self.holdout_seed,
+            },
             "metrics": self.metrics,
             "classes": [int(value) for value in self._classes()],
             "is_baseline": False,
