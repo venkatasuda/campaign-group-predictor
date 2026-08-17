@@ -794,7 +794,17 @@ data keeps arriving and the feedback loop does not close on itself.
 | Service health | Latency p50/p95, error rate | Standard SRE alerting |
 
 Retraining is monthly plus drift-triggered. A challenger is promoted only if it beats the
-champion on **both** CV macro F1 and business lift.
+champion on **CV accuracy** *and* business lift, **and by more than one fold standard
+deviation** — on this data a 0.4-point win is not a win. Accuracy rather than macro F1,
+because accuracy *is* the campaign success rate; selecting on macro F1 was tried and chose a
+model scoring below the naive baseline.
+
+**One monitoring signal deserves separate mention: position-convention drift.** 53.8% of
+predictions change when the two groups are swapped. If the upstream convention for assigning
+"group 1" ever changes, the model degrades sharply and *silently* — no error, no latency
+change, no drift in the input marginals, just worse decisions. Tracking the swap-invariance
+rate on recent traffic is the cheapest guard, and it is the failure mode I would expect to
+occur before any of the four above.
 
 ---
 
@@ -851,6 +861,43 @@ curl https://campaign-api-395867964283.europe-west3.run.app/health
 curl -X POST https://campaign-api-395867964283.europe-west3.run.app/predict \
   -H "Content-Type: application/json" -d @payload.json
 ```
+
+**Cold start.** The service scales to zero, and the champion artifact is 62 MB — 400 trees on
+4,236 rows, unpruned. The first request after an idle period takes roughly **15 seconds**
+while the container starts and the pipeline deserialises; steady-state p95 is **91 ms**
+(measured, `scripts/measure_latency.py`).
+
+Three fixes exist and none was applied: raise `min_samples_leaf`, reduce `n_estimators`, or
+serialise with `joblib.dump(compress=3)`. Each changes either the model or the artifact, and
+therefore every number in this report. For campaign planning — a scheduled, human-in-the-loop
+activity — a 15-second first request is tolerable. For interactive use it is not, and the
+answer is `min-instances=1`, which costs money continuously and is a business decision rather
+than an engineering one.
+
+### 7.4 Input validation, authentication and rate limiting
+
+**Validation is enforced; the perimeter is documented.** The distinction is deliberate.
+
+The Pydantic schema rejects, with `422` and a reason:
+
+| Input | Why it is refused |
+|---|---|
+| `NaN` | Indistinguishable from null downstream but arrives by a different path — usually a failed upstream computation. A caller should have one deliberate way to say "no value" |
+| `±inf`, `\|value\| > 1e6` | Finite-but-implausible values pass every type check and overflow during standardisation. The caller then receives a `500` for what is unambiguously a client error |
+| More than 20% of features null | The median imputer fills every gap confidently, so a request of 67 nulls previously returned a well-formed prediction with a confidence score, built entirely from training medians. **A campaign must never be approved from an empty request** |
+
+These are correctness properties, not perimeter ones, which is why they are in the
+application rather than deferred to a gateway. No amount of authentication would have
+prevented an authorised caller from submitting an empty payload and receiving a
+budget-allocating recommendation.
+
+**Authentication and rate limiting are not implemented, and that is a submission decision.**
+The service is unauthenticated so it can be evaluated by opening a URL; handing credentials
+to three reviewers by email is worse practice than the exposure it prevents, and the payload
+contains no personal data. Production would remove `--allow-unauthenticated` (a two-line
+Terraform change, caller holding `roles/run.invoker`) and rate-limit at Cloud Armor rather
+than in-process — an in-process limiter on a scale-to-zero service limits *per instance*, so
+the effective global ceiling rises exactly when a ceiling is needed. See `docs/architecture.md`.
 
 ---
 

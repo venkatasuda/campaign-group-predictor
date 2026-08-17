@@ -54,3 +54,6 @@ terraform/crash.log
 
 .env
 .DS_Store
+
+# The assignment brief - LP-Internal, reproduction prohibited
+YOUR_TASKS.md

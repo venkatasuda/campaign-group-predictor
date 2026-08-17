@@ -318,8 +318,31 @@ re-measuring rather than assuming.
 production means a bad artifact fails the deploy rather than silently serving a baseline.
 
 **Security** — no PII in the payload (aggregate group statistics only); non-root
-container user; CORS restricted to the frontend origin in production; API Gateway or IAM
-in front for authentication.
+container user; CORS restricted to the frontend origin in production.
+
+### Authentication and rate limiting — stated, not implemented
+
+**The deployed service is intentionally unauthenticated, and this is a submission decision
+rather than an oversight.** It exists so the API can be evaluated by opening a URL. Handing a
+credential to three reviewers by email would be worse practice than the exposure it prevents,
+and the endpoint carries no personal data — the payload is 67 aggregate group statistics and
+the response is a targeting recommendation.
+
+**What production requires instead, and why each choice sits where it does:**
+
+| Control | Where | Why not in the application |
+|---|---|---|
+| Authentication | Remove `--allow-unauthenticated`; caller holds `roles/run.invoker` | Cloud Run checks the IAM token before the container is reached. An in-app API key would still require the request to be admitted, scheduled and parsed first |
+| Rate limiting | Cloud Armor at the load balancer | An in-process limiter on a scale-to-zero service limits *per instance*. Cloud Run adds instances under load, so the effective global limit rises exactly when a limit is needed. The constraint belongs to the edge |
+| Quota per caller | API Gateway or Apigee | Per-consumer quotas need an identity the service does not have |
+
+The Terraform change is two lines. The reason it is not applied is that a reviewer clicking a
+link and receiving `401` learns less about this system than a reviewer receiving a prediction.
+
+**One control that is *not* deferred:** input validation. Rejecting non-finite values,
+implausible magnitudes and mostly-null payloads is enforced in the Pydantic schema, because
+that is a correctness property rather than a perimeter one. A campaign must never be approved
+from an empty request, and no amount of authentication would have prevented that.
 
 **Governance** — every artifact carries `model_name`, `model_version`, `trained_at` and
 its offline metrics, exposed at `/model/info` so any prediction can be traced to a model.
