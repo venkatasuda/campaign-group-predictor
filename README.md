@@ -777,5 +777,11 @@ to misallocating one campaign in twenty. It is a required, explicit input; see
   so if groups recur across rows every confidence interval here is too narrow.
 - The champion's margin over the runner-up is inside noise. Selection happening before the
   test set was opened is the defensible property, not the identity of the winner.
+- **The evaluation protocol is a single 20% holdout, not out-of-fold selection with a full
+  refit.** That leaves 1,060 development rows unused and estimates accuracy on 1,324 rows
+  (standard error 1.37 pp) where 5,296 out-of-fold rows would give roughly 0.68 pp, halving
+  the width of the lift interval. Not adopted because it refines a number without changing a
+  decision — the lift is already significantly positive and the champion's margin is already
+  inside noise. Reasoning in full at `reports/FINAL_REPORT.md` §8.6.
 - The frontend exposes 67 numeric inputs; a production version would pull group
   statistics from the customer database instead of manual entry.

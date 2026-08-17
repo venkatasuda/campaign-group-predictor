@@ -728,10 +728,30 @@ Stated plainly, because each one bounds a claim above.
 4. **No temporal validation is possible** — no time-ordering column, so generalisation to
    *future* campaigns rather than held-out ones is untested.
 5. **The holdout is a reused confirmation set**, not a virgin test set.
-6. **1,060 development rows are unused.** After calibration was rejected the model was not
-   refit on train + calibration. The correct protocol is out-of-fold selection then refit on
-   all development data; it was not done because it changes every number in every document,
-   and a single coherent story was judged more valuable than a marginally better estimate.
+6. **1,060 development rows are unused, and the evaluation set is smaller than it needs to
+   be.** After calibration was rejected the model was not refit on train + calibration. The
+   correct protocol is out-of-fold selection across all 5,296 development rows, then refit on
+   all of them — 25% more training data, and an estimate averaged over four times as many
+   evaluation rows.
+
+   The gain is quantifiable rather than hypothetical. Accuracy measured on 1,324 test rows
+   carries a standard error of 1.37 pp; over 5,296 out-of-fold rows that falls to roughly
+   0.68 pp, which would approximately halve the width of the lift interval — from
+   [+5.66, +11.18] to something nearer [+7.0, +9.8].
+
+   **It was still not done, and "it would change every document" is not the reason.** The
+   reason is that it would refine a number without changing a decision. The champion leads
+   XGBoost by 0.40 points against a fold spread of 0.014 and a split-seed swing of 2.72
+   points (§5.1); a tighter interval around a lift that is already significantly positive
+   moves no recommendation — the model still ships, the policy still flags the same
+   near-ties, and the class-0 weakness in limitation 1 is unaffected. Against a finite
+   verification budget, one internally consistent set of numbers was judged worth more than a
+   more precise set carrying the risk of partial reconciliation across eight documents, a
+   deployment and a release archive.
+
+   What would change the judgement: an out-of-fold estimate landing outside the current
+   interval. That measurement is cheap — it needs no retrain and touches no artifact — and is
+   the first thing to run before the next round of modelling work.
 7. **53.8% of predictions fail to transform correctly under a group swap.** The symmetry
    requires 0→0, 1→2, 2→1, so for classes 1 and 2 *changing is correct* and staying the same
    is the violation — the figure measures failure to flip, not flipping. The positions are
