@@ -134,16 +134,21 @@ variable "api_min_instances" {
     Campaign planning is bursty rather than continuous, so idle cost dominates if this is
     raised.
 
-    The cold start has been measured rather than assumed: **15.5 seconds** for the first
-    request after an idle period, against a steady-state p95 of 91 ms
-    (`reports/latency.json`). That is container start, image pull and model
-    deserialisation together.
+    Steady state is measured: **p95 178 ms**, median 129 ms over 50 requests against the
+    deployed service (`reports/latency.json`).
+
+    The cold start is **not** measured to the same standard, and the difference is stated
+    rather than blurred. One observation against a genuinely cold container recorded roughly
+    15 seconds - container start, image pull and deserialisation of a 47 MB artifact
+    together. A later run reached a container Cloud Run had kept warm and saw 1.2 seconds.
+    One observation is not a measurement, so treat the cold start as *of the order of
+    seconds* rather than as a figure. That measurement also predates slimming the serving
+    image, so the true value is likely lower again.
 
     Zero remains the right default here - one person absorbs that wait once per planning
     session, and the alternative is paying for an always-warm instance between campaigns.
     Raise it to 1 if either becomes true: the API acquires a machine consumer that retries
-    on timeout, or the frontend's first-load experience is judged unacceptable. Note the
-    measurement predates slimming the serving image, so the true figure is now lower.
+    on timeout, or the frontend's first-load experience is judged unacceptable.
   EOT
   type        = number
   default     = 0

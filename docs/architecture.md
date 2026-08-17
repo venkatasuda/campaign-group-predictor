@@ -282,33 +282,41 @@ sequenceDiagram
 **Scalability** — stateless containers; Cloud Run autoscales on concurrency. Batch
 endpoint amortises overhead for campaign-wide scoring.
 
-**Latency** — measured, not asserted. 100 requests against the deployed service from a
+**Latency** — measured, not asserted. 50 requests against the deployed service from a
 developer machine in Germany (`scripts/measure_latency.py`, raw output in
-`reports/latency.json`):
+`reports/latency.json`, 0 failures):
 
 | | ms |
 |---|---|
-| median | 37.1 |
-| mean | 42.8 |
-| **p95** | **91.0** |
-| p99 / max | 126.7 |
-| **first request (cold start)** | **15,450** |
+| min | 105.0 |
+| median | 129.3 |
+| mean | 134.8 |
+| **p95** | **177.5** |
+| p99 / max | 210.7 |
+| first request, warm container | 1,206.9 |
 
 Percentiles rather than a mean, because a mean hides the tail and the tail is what times
 out. These include internet round-trip, so service-side latency is lower.
 
 **The cold start is the finding.** Steady-state performance is comfortable — **median 129 ms,
-p95 178 ms** end-to-end (`reports/latency.json`), with the model loaded once at container
-startup rather than per request. But a scale-to-zero service pays container start, image pull
-and deserialisation of a 47 MB artifact on the first request after an idle period.
+p95 178 ms** end-to-end, with the model loaded once at container startup rather than per
+request. But a scale-to-zero service pays container start, image pull and deserialisation of a
+47 MB artifact on the first request after an idle period.
 
 **How long that takes is *not* something this project has measured repeatably**, and the
 distinction matters. A single observation against a genuinely cold container recorded roughly
-15 seconds; a later run against a service Cloud Run had kept warm recorded 1.2 seconds for its
-first request. Both are in the same file at different times, which is why the honest statement
-is *"of the order of seconds, observed once at ~15 s"* rather than a figure quoted as though
-established. An earlier version of this document quoted 15.5 s and sub-100 ms p95 while
-`latency.json` held different values — a contradiction found in review, not by me.
+15 seconds; the run recorded above reached a container Cloud Run had kept warm, and its first
+request took 1.2 seconds. Those are different situations, not a range: the 15 s figure is one
+observation and is **not** the number in `latency.json`. The honest statement is *"of the order
+of seconds, observed once at ~15 s"* rather than a figure quoted as though established.
+
+An earlier version of this document quoted 15.5 s and sub-100 ms p95 while `latency.json` held
+different values — a contradiction found in review, not by me. **The table above previously
+reproduced that same defect**, carrying median 37.1 ms and p95 91.0 ms from a superseded
+100-request run while the paragraph beneath it, the model card and the final report all quoted
+129/178 from the current file. Every figure in this section is now read from
+`reports/latency.json`; the only number that is not is the 15 s cold-start observation, and it
+is labelled as such.
 
 For campaign planning a slow first request is defensible: sessions are bursty, one person
 absorbs the wait once per session, and the alternative is paying for an always-warm instance
