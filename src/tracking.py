@@ -209,12 +209,20 @@ def log_model(mlflow: Any | None, pipeline: Any, name: str = "model") -> None:
     if mlflow is None:
         return
     try:
-        import mlflow.sklearn
+        # Imported under an alias, not as `import mlflow.sklearn`.
+        #
+        # That form binds the top-level name `mlflow`, which shadows this function's own
+        # `mlflow` parameter. It happens to work - the module and the passed handle are the
+        # same object - so the bug is invisible at runtime and only appears as a mypy
+        # redefinition error. It would stop working the moment a caller passed anything
+        # other than the module itself, which is exactly what the test suite's recording
+        # stub does.
+        from mlflow import sklearn as mlflow_sklearn
 
-        mlflow.sklearn.log_model(
+        mlflow_sklearn.log_model(
             pipeline,
             name=name,
-            serialization_format=mlflow.sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
+            serialization_format=mlflow_sklearn.SERIALIZATION_FORMAT_CLOUDPICKLE,
         )
     except Exception as error:  # noqa: BLE001 - tracking must never break training
         logger.warning(

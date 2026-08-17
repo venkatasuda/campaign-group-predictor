@@ -1,4 +1,4 @@
-# Optional dependencies - stronger models and richer explanations.
+# Optional dependencies - stronger models, richer explanations, experiment tracking.
 #
 # Every import of these is guarded in the source, so the project trains, serves and
 # passes its tests without them:
@@ -7,6 +7,16 @@
 #     logistic regression, random forest, HistGradientBoosting and the MLP
 #   * shap                           -> explainability falls back to permutation
 #     importance, which is model-agnostic and always available
+#   * mlflow                         -> src/tracking.py degrades to a no-op; the artifact
+#     and metrics.json are still written, but no run history is recorded
+#
+# On mlflow specifically. It was previously installed ad hoc and declared nowhere, which is
+# the worst of both states: the project documents experiment tracking as a feature, and
+# anyone cloning it got a silent no-op instead. The graceful degradation was doing its job
+# so well that the missing dependency produced no symptom.
+#
+# It is optional rather than core because tracking must never be able to fail a training
+# run - but optional means "declared and skippable", not "undeclared".
 #
 # They are separated from requirements.txt because these packages are the most likely
 # to lack a prebuilt wheel for a brand-new Python release, and a source build needs a
@@ -25,3 +35,4 @@ lightgbm>=4.3
 xgboost>=2.0
 catboost>=1.2
 shap>=0.45
+mlflow>=2.12
