@@ -168,8 +168,10 @@ def convert(markdown: str, document: Document) -> None:
 
         # Body text: join wrapped lines into one paragraph
         block = []
-        while index < len(lines) and lines[index].strip() and not re.match(
-            r"^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|---$)", lines[index]
+        while (
+            index < len(lines)
+            and lines[index].strip()
+            and not re.match(r"^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s|>|\||```|---$)", lines[index])
         ):
             block.append(lines[index].strip())
             index += 1
