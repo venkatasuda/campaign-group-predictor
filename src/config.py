@@ -59,12 +59,32 @@ class Settings(BaseSettings):
 
     # ------------------------------------------------------------------ decisions
     #: Attach the cost-sensitive recommendation to prediction responses.
-    enable_decision_layer: bool = True
+    #:
+    #: **Defaults to False.** The layer is sound engineering and its structure is correct,
+    #: but it converts probabilities into a euro-denominated action using cost values that
+    #: **nobody has supplied**. The dataset contains no monetary figures at all. Shipping it
+    #: on by default means the API tells a campaign manager what to do, in an authoritative
+    #: tone, based on numbers this project invented.
+    #:
+    #: There is a second, subtler reason. The reported 54.83% is the *classifier's* argmax
+    #: accuracy, but with this layer enabled the API recommends a different action on 38 of
+    #: 1,324 campaigns - so the deployed behaviour is not the behaviour the headline number
+    #: describes. Measuring one thing and shipping another is the failure mode; defaulting to
+    #: off means the two agree unless someone deliberately opts in.
+    #:
+    #: Enable it when the marketing team supplies real spend and margin figures, and report
+    #: the *policy's* accuracy and class-0 recall alongside the classifier's.
+    enable_decision_layer: bool = False
 
-    #: Average cost of running one campaign, in `decision_currency`.
+    #: Relative cost of running one campaign. NOT a currency amount.
+    #:
+    #: These three values are a *ratio scale*, not money. The dataset contains no monetary
+    #: figures, so 1.0 here means "one unit of campaign spend" and nothing more. An earlier
+    #: version labelled them EUR, which gave invented relative weights the appearance of
+    #: measured financial values.
     campaign_spend: float = 1.0
 
-    #: Average net profit when the correct group is targeted.
+    #: Relative net profit when the correct group is targeted. See `campaign_spend`.
     profit_if_correct: float = 1.0
 
     #: Fraction of the profit charged for declining a campaign that would have paid off.
@@ -102,7 +122,13 @@ class Settings(BaseSettings):
     #: for exactly that purpose.
     exploration_rate: float = 0.0
 
-    decision_currency: str = "EUR"
+    #: Label attached to the cost figures in API responses and logs.
+    #:
+    #: Deliberately **not** a currency code. `campaign_spend` and `profit_if_correct` are a
+    #: ratio scale supplied by this project, not amounts supplied by the business, and
+    #: labelling them "EUR" made invented weights read as measured euros to anyone consuming
+    #: the API. Set this to a real currency code only once the values are real.
+    decision_currency: str = "relative units"
 
     def allowed_origins_list(self) -> list[str]:
         """Parse ``allowed_origins`` into a list, preserving the wildcard sentinel."""

@@ -41,7 +41,8 @@ appears.
 campaigns that lose money whichever group is targeted, it flags fewer than one in ten. That
 is the outcome with the clearest monetary value, and it is where every candidate failed.
 
-**The model is 53.8% position-dependent.** More than half its predictions change when the
+**The model is 53.8% position-dependent.** More than half its predictions fail to transform
+correctly when the
 two groups are swapped. The two positions are genuinely not exchangeable, so this is
 defensible signal rather than a defect — but it means the model has partly learned *which
 slot* a group occupies, and would degrade sharply if that convention changed upstream.
@@ -218,8 +219,10 @@ target group 1" is the strongest naive baseline at 46.45%. Mirroring would have 
 model to be blind to the dataset's best genuine prior. A technique adopted to remove a
 "shortcut" would have destroyed real information.
 
-The cost of keeping it is measured: the deployed model's predictions change under a group
-swap **53.8% of the time**, so it has partly learned position rather than group
+The cost of keeping it is measured: the deployed model **fails to transform correctly under a
+group swap 53.8% of the time**. The direction matters — the symmetry requires 0→0, 1→2, 2→1,
+so for classes 1 and 2 *changing is the correct behaviour* and staying the same is the
+violation. So it has partly learned position rather than group
 characteristics. If the labelling convention changes upstream, it degrades sharply. Stated
 as a limitation, not presented as robustness.
 
@@ -800,7 +803,8 @@ because accuracy *is* the campaign success rate; selecting on macro F1 was tried
 model scoring below the naive baseline.
 
 **One monitoring signal deserves separate mention: position-convention drift.** 53.8% of
-predictions change when the two groups are swapped. If the upstream convention for assigning
+predictions fail to transform correctly when the two groups are swapped — the model leans
+heavily on which slot a group occupies. If the upstream convention for assigning
 "group 1" ever changes, the model degrades sharply and *silently* — no error, no latency
 change, no drift in the input marginals, just worse decisions. Tracking the swap-invariance
 rate on recent traffic is the cheapest guard, and it is the failure mode I would expect to
@@ -862,10 +866,38 @@ curl -X POST https://campaign-api-395867964283.europe-west3.run.app/predict \
   -H "Content-Type: application/json" -d @payload.json
 ```
 
-**Cold start.** The service scales to zero, and the champion artifact is 62 MB — 400 trees on
-4,236 rows, unpruned. The first request after an idle period takes roughly **15 seconds**
-while the container starts and the pipeline deserialises; steady-state p95 is **91 ms**
-(measured, `scripts/measure_latency.py`).
+**Latency.** All figures below are from `reports/latency.json`, written by
+`scripts/measure_latency.py` against the deployed service. They are **client-observed
+wall-clock times** — serialisation, internet round trip, queueing, inference and
+deserialisation together — which is what a caller experiences, not a clean measure of service
+time.
+
+| | |
+|---|---|
+| Median | **129 ms** |
+| p95 | **178 ms** |
+| p99 | 211 ms |
+| First request of a warm-instance run | 1,207 ms |
+
+**On cold start, and why this figure is reported with a caveat rather than a number.** The
+service scales to zero, so the first request after an idle period pays container start plus
+deserialisation of the **47 MB** artifact. A single earlier observation against a genuinely
+cold container recorded roughly 15 seconds. That measurement is **not reproducible on
+demand** — Cloud Run keeps an instance warm for an unpredictable period, so a run that
+happens to reach a live instance measures something else entirely, as the 1,207 ms figure
+above shows.
+
+The honest statement is therefore: **steady-state p95 is 178 ms; cold start is of the order
+of seconds and has been observed once at ~15 s, but the project does not have a repeatable
+measurement of it.** An earlier version of this report quoted 15 s and 91 ms as though both
+were established, while `latency.json` recorded different values — a discrepancy a reviewer
+found before I did.
+
+Three mitigations exist and none was applied: raise `min_samples_leaf`, reduce
+`n_estimators`, or serialise with `joblib.dump(compress=3)`. Each changes either the model or
+the artifact and therefore every number in this report. For campaign planning — scheduled,
+human-in-the-loop — a slow first request is tolerable; for interactive use the answer is
+`min-instances=1`, which costs money continuously and is a business decision.
 
 Three fixes exist and none was applied: raise `min_samples_leaf`, reduce `n_estimators`, or
 serialise with `joblib.dump(compress=3)`. Each changes either the model or the artifact, and
@@ -915,10 +947,17 @@ the effective global ceiling rises exactly when a ceiling is needed. See `docs/a
 3. **Independence cannot be verified.** The dataset has no campaign or customer-group
    identifier, so repeated segments across rounds would be undetectable. If such structure
    exists, cross-validated scores are optimistic and a grouped split would be required.
-4. **The model is 53.8% position-dependent.** Its predictions change under a group swap more
-   often than not. This is defensible — the positional prior is real and is the strongest
-   naive baseline — but the model has partly learned which slot a group occupies, and would
-   degrade sharply if that convention changed upstream.
+4. **The model is 53.8% position-dependent.** Its predictions fail to transform correctly
+   under a group swap more often than not — the symmetry requires 0→0, 1→2, 2→1, so for
+   classes 1 and 2 *not* changing is the failure. This is defensible: the positional prior is
+   real and is the strongest naive baseline. But the model has partly learned which slot a
+   group occupies, and would degrade sharply if that convention changed upstream.
+
+   **Two caveats on this diagnostic itself.** The mirror transformation for the `c_` block is
+   heuristic — it infers which comparison features are direction-dependent from their
+   distributions — and it demonstrably **failed on `c_2`**, the single most predictive
+   feature. So the 53.8% figure is measured against an imperfect mirror, and should be read
+   as evidence that position matters rather than as a precise quantity.
 5. **Model choice is not identifiable from this data.** The champion leads by 0.004 CV
    accuracy against standard deviations of 0.005 and 0.009; nested estimates overlap; and
    two search strategies over identical folds selected different winners. The deployed model

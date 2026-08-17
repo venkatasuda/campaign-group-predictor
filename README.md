@@ -754,7 +754,9 @@ to misallocating one campaign in twenty. It is a required, explicit input; see
   decisive evidence.
 - **Class-0 recall is 8.4%.** The model is weakest exactly where the business value is
   clearest — avoiding spend on a campaign that pays back for neither group.
-- **53.8% of predictions flip when the two groups are swapped.** The positions are genuinely
+- **53.8% of predictions FAIL to transform correctly when the two groups are swapped.** Note
+  the direction: the symmetry requires 0→0, 1→2, 2→1, so for classes 1 and 2 *changing is
+  correct* and staying the same is the violation. The positions are genuinely
   not exchangeable, so using position is legitimate, but the model leans on it heavily and
   will degrade silently if the upstream convention for assigning "group 1" ever changes.
 - **No temporal validation is possible** — no time-ordering column exists, so generalisation

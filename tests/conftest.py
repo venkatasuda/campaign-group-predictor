@@ -138,3 +138,32 @@ def client_with_model(settings: Settings) -> Any:
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def settings_with_decisions(settings: Settings) -> Settings:
+    """Settings with the cost-sensitive decision layer explicitly switched on.
+
+    The layer defaults to **off** because it converts probabilities into a recommended
+    action using cost values nobody has supplied - the dataset contains no monetary figures.
+    Tests that exercise the layer therefore have to ask for it, and that is the point of a
+    separate fixture rather than flipping the base one: the default fixture keeps testing
+    the behaviour that actually ships, and any test needing the layer states so at its own
+    call site.
+    """
+    return settings.model_copy(update={"enable_decision_layer": True})
+
+
+@pytest.fixture
+def client_with_decisions(settings_with_decisions: Settings) -> Any:
+    """TestClient with a deterministic predictor AND the decision layer enabled."""
+    from src.api.dependencies import get_predictor
+
+    app = create_app(settings_with_decisions)
+    app.dependency_overrides[get_predictor] = lambda: MajorityClassPredictor(
+        majority_class=2,
+        class_distribution={"no_group_profitable": 0.1, "group_1": 0.3, "group_2": 0.6},
+    )
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()

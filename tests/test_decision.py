@@ -48,6 +48,18 @@ class TestCostMatrix:
         assert matrix.matrix[1][1] == -2000.0
         assert matrix.matrix[1][2] == 500.0
         assert matrix.matrix[1][0] == 1000.0
+
+        # "relative units", not a currency code. `campaign_spend` and `profit_if_correct`
+        # are a ratio scale this project supplied; the dataset contains no monetary values
+        # at all. The default was previously "EUR", which meant every API response and every
+        # logged decision presented invented weights as measured euros.
+        assert matrix.currency == "relative units"
+
+    def test_a_real_currency_can_be_supplied(self) -> None:
+        """Once the business provides actual figures, label them honestly."""
+        matrix = CostMatrix.from_business_parameters(
+            campaign_spend=500.0, profit_if_correct=2000.0, currency="EUR"
+        )
         assert matrix.currency == "EUR"
 
     def test_from_business_parameters_rejects_negative_amounts(self) -> None:

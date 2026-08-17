@@ -1296,20 +1296,27 @@ def cost_sensitivity_table(
 
 
 def invariance_table(invariance: Any) -> pd.DataFrame:
-    """How much of the model's behaviour is position rather than signal."""
+    """How much of the model's behaviour is position rather than signal.
+
+    The row labels are worded precisely because the natural paraphrase is wrong. A
+    *violation* is a failure to transform as the symmetry requires - 0 stays 0, 1 becomes 2,
+    2 becomes 1. For classes 1 and 2, **changing is the correct behaviour**, so "predictions
+    that changed" describes the opposite of what is measured. Four documents describing this
+    project carried that inversion before it was caught.
+    """
     return pd.DataFrame(
         {
             "value": [
                 f"{invariance.violation_rate:.2%}",
                 f"{invariance.position_bias:+.2%}",
-                f"{invariance.class_0_flip_rate:.2%}",
+                f"{invariance.class_0_stay_rate:.2%}",
                 str(invariance.per_class_violation_rate),
             ]
         },
         index=[
-            "predictions that changed when the groups were swapped",
+            "predictions that FAILED to transform correctly under a group swap",
             "position bias, P(predict 1) − P(predict 2)",
-            "class-0 predictions that changed",
-            "violation rate per predicted class",
+            "class-0 predictions that correctly stayed class 0",
+            "failure rate per predicted class",
         ],
     )

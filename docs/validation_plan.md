@@ -80,18 +80,46 @@ should measure model-versus-baseline **on the same subset**, since the baseline 
 above its 46.45% average on easy campaigns — comparing a gated model against an ungated
 baseline would overstate the gain.
 
-### Translating into money
+### Why there is no euro figure here
 
-With `C` campaigns per year at average spend `S` and average return `R` on a correctly
-targeted campaign:
+The brief asks for the improvement in **campaign success rate**, and that is answered
+directly above: **46.45% → 54.83%, a lift of +8.38 pp**. It does not ask for a monetary
+estimate, and the dataset contains no monetary values from which one could be derived.
+
+**An earlier version of this document did attempt one, and it was wrong twice over.** It
+proposed:
 
 ```
-Additional value = C x (lift_pp / 100) x R          # better targeting
-                 + C x P(class 0) x avoidance_rate x S   # avoided waste
+Additional value = C × (lift_pp / 100) × R      # better targeting
+                 + C × P(class 0) × avoidance_rate × S   # avoided waste
 ```
 
-State the assumed `C`, `S` and `R` explicitly in the report — the point is the method,
-not a precise euro figure.
+The first term **already contains the second**. `lift_pp` is a difference in *accuracy*, and
+accuracy counts every correct decision — including correctly predicting class 0. So avoided
+campaigns are counted once inside the accuracy lift and again in the second term, at a
+different price. The formula inflates the business case, and it does so in the direction that
+flatters the model.
+
+It also required `C`, `S` and `R` — none of which exist in the data — so the output would
+have been an arithmetic error dressed in invented inputs.
+
+**What a correct valuation would require.** Not two additive terms, but the **full 3×3
+action/outcome matrix**, valued state by state:
+
+| True state ↓ / Action → | do not run | target group 1 | target group 2 |
+|---|---|---|---|
+| neither profitable | saved spend | −spend | −spend |
+| group 1 profitable | −foregone margin | +margin₁ | −spend |
+| group 2 profitable | −foregone margin | −spend | +margin₂ |
+
+Each cell has its own euro consequence, and the total is the sum over the confusion matrix
+weighted by those nine values. The decision layer already uses exactly this structure — it is
+the cost matrix in §5 of the model card — so the machinery exists. **What is missing is the
+three business numbers**, and until the marketing team supplies them, filling them in produces
+a figure with the precision of a measurement and the content of a guess.
+
+That is why the decision layer ships **disabled by default**, and why results are reported as
+a sensitivity analysis across three plausible cost ratios rather than as one euro total.
 
 ## 3. Why offline numbers are not enough
 
@@ -252,7 +280,7 @@ variance, since small propensities otherwise dominate the estimate.
 | Feature drift | PSI / KS test on incoming features vs. training | Investigate at PSI > 0.2 |
 | Prediction drift | Predicted class distribution vs. training | Alert on sustained shift |
 | Performance decay | Realised success rate vs. the 46.45% naive baseline, once outcomes land | Retire the model if it falls below the baseline — at that point it subtracts value |
-| **Position-convention drift** | Distribution of `group_1` vs `group_2` inputs; symmetry violation rate on recent traffic | **Alert loudly.** 53.8% of predictions flip under a group swap, so a change in how upstream assigns "group 1" degrades the model sharply and silently |
+| **Position-convention drift** | Distribution of `group_1` vs `group_2` inputs; symmetry violation rate on recent traffic | **Alert loudly.** 53.8% of predictions *fail to transform correctly* under a group swap (the symmetry requires 0→0, 1→2, 2→1), so the model relies heavily on which slot a group occupies and a change in the upstream convention degrades it sharply and silently |
 | Coverage under the gate | Share of requests above the 0.60 confidence threshold | Investigate a sustained fall — it means the model is losing confidence before it loses accuracy |
 | Data quality | Null rate, out-of-range values per feature | Block and alert |
 | Service health | Latency p50/p95, error rate, uptime | Standard SRE alerting |

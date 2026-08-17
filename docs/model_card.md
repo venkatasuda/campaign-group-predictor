@@ -231,9 +231,15 @@ conditional lift stated, not the flattering one.
 Which group is labelled "1" would be arbitrary if the positions were exchangeable. They are
 not (§3), so the model legitimately uses position — but it uses it heavily:
 
+**Read the direction carefully.** Exchanging the two groups should map the prediction
+0→0, 1→2, 2→1. A *violation* is a failure to make that transformation — so for classes 1 and
+2 **changing is the correct behaviour** and staying the same is the fault. Describing this
+figure as "predictions that change under a swap" states the opposite of what is measured.
+
 | | |
 |---|---|
-| Predictions that change under a group swap | **53.8%** |
+| Predictions that **fail to transform correctly** under a group swap | **53.8%** |
+| Class-0 predictions that correctly stayed class 0 | 75.2% |
 | Position bias in the labels | +18.11 pp |
 
 **This is a deployment risk, not a robustness property.** The model has partly learned which
@@ -425,7 +431,8 @@ be needed.
    step were in scope from the start — even though calibration was ultimately rejected on
    evidence.
 3. A single joblib artifact deploys cleanly to Cloud Run with sub-100 ms CPU inference
-   (measured: p95 91 ms) and a straightforward permutation-importance explanation story.
+   (measured: **p95 178 ms**, median 129 ms — `reports/latency.json`) and a straightforward
+   permutation-importance explanation story.
 4. Including a neural baseline and a foundation-model benchmark means the choice is made on
    measured evidence rather than on assumption.
 

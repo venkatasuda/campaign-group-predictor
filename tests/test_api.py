@@ -163,18 +163,40 @@ class TestUnhandledExceptions:
 
 
 class TestDecisionLayer:
-    def test_decision_block_is_attached_when_probabilities_exist(
+    """The layer is opt-in, so these tests use `client_with_decisions`.
+
+    Enabling it explicitly is the point. The layer turns probabilities into a recommended
+    action using cost values nobody has supplied, so it ships **off**; a test that got the
+    decision block from the default fixture would be asserting behaviour the deployed
+    service does not have.
+    """
+
+    def test_no_decision_block_by_default(
         self, client_with_model: TestClient, valid_payload: dict
     ) -> None:
+        """The shipped default: a prediction, and no recommended action.
+
+        This is the important one. The reported 54.83% accuracy describes the classifier's
+        argmax; with the decision layer on, the API recommends a *different* action on some
+        campaigns. Defaulting to off keeps the number and the behaviour describing the same
+        thing.
+        """
         body = client_with_model.post("/predict", json=valid_payload).json()
+        assert body["decision"] is None
+        assert body["predicted_class"] in (0, 1, 2)
+
+    def test_decision_block_is_attached_when_enabled(
+        self, client_with_decisions: TestClient, valid_payload: dict
+    ) -> None:
+        body = client_with_decisions.post("/predict", json=valid_payload).json()
         assert body["decision"] is not None
         assert body["decision"]["action"] in (0, 1, 2)
         assert body["decision"]["rationale"]
 
     def test_decision_reports_expected_costs_for_every_action(
-        self, client_with_model: TestClient, valid_payload: dict
+        self, client_with_decisions: TestClient, valid_payload: dict
     ) -> None:
-        decision = client_with_model.post("/predict", json=valid_payload).json()["decision"]
+        decision = client_with_decisions.post("/predict", json=valid_payload).json()["decision"]
         assert set(decision["expected_costs"]) == {
             "do_not_run",
             "target_group_1",
@@ -182,16 +204,24 @@ class TestDecisionLayer:
         }
 
     def test_decision_records_the_argmax_for_comparison(
-        self, client_with_model: TestClient, valid_payload: dict
+        self, client_with_decisions: TestClient, valid_payload: dict
     ) -> None:
-        decision = client_with_model.post("/predict", json=valid_payload).json()["decision"]
+        decision = client_with_decisions.post("/predict", json=valid_payload).json()["decision"]
         assert decision["argmax_class"] == 2
         assert isinstance(decision["differs_from_argmax"], bool)
 
-    def test_model_info_exposes_the_cost_matrix(self, client: TestClient) -> None:
-        policy = client.get("/model/info").json()["decision_policy"]
+    def test_model_info_reports_no_policy_by_default(self, client: TestClient) -> None:
+        assert client.get("/model/info").json()["decision_policy"] is None
+
+    def test_model_info_exposes_the_cost_matrix_when_enabled(
+        self, client_with_decisions: TestClient
+    ) -> None:
+        policy = client_with_decisions.get("/model/info").json()["decision_policy"]
         assert policy is not None
         assert "cost_matrix" in policy
+        # The costs are a ratio scale supplied by this project, not money. Labelling them
+        # with a currency code would present invented weights as measured amounts.
+        assert policy["cost_matrix"]["currency"] == "relative units"
 
     def test_decision_layer_can_be_disabled(self, settings, valid_payload: dict) -> None:
         from fastapi.testclient import TestClient as Client
@@ -209,17 +239,17 @@ class TestDecisionLayer:
         assert body["predicted_class"] in (0, 1, 2)
 
     def test_batch_predictions_carry_decisions(
-        self, client_with_model: TestClient, valid_payload: dict
+        self, client_with_decisions: TestClient, valid_payload: dict
     ) -> None:
-        body = client_with_model.post(
+        body = client_with_decisions.post(
             "/predict/batch", json={"comparisons": [valid_payload] * 3}
         ).json()
         assert all(item["decision"] is not None for item in body["predictions"])
 
     def test_decision_reports_the_exploration_flag(
-        self, client_with_model: TestClient, valid_payload: dict
+        self, client_with_decisions: TestClient, valid_payload: dict
     ) -> None:
-        decision = client_with_model.post("/predict", json=valid_payload).json()["decision"]
+        decision = client_with_decisions.post("/predict", json=valid_payload).json()["decision"]
         assert decision["exploration"] is False  # exploration is disabled in test settings
 
 
@@ -231,7 +261,15 @@ class TestConfigurationIsSingleSource:
 
         from src.api.main import create_app
 
-        custom = settings.model_copy(update={"campaign_spend": 500.0, "profit_if_correct": 2000.0})
+        custom = settings.model_copy(
+            update={
+                "campaign_spend": 500.0,
+                "profit_if_correct": 2000.0,
+                # Explicit: the layer is off by default, so a test of its configuration has
+                # to switch it on.
+                "enable_decision_layer": True,
+            }
+        )
         app = create_app(custom)
         with Client(app) as client:
             costs = client.get("/model/info").json()["decision_policy"]["cost_matrix"]["costs"]

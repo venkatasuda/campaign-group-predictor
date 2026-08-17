@@ -194,8 +194,25 @@ class InvarianceReport:
 
     n_rows: int
     n_violations: int
+
+    #: Fraction of rows whose mirrored prediction did NOT equal the expected transform
+    #: (0 stays 0, 1 becomes 2, 2 becomes 1).
+    #:
+    #: Read carefully: this is a *failure to transform correctly*, not a count of
+    #: predictions that changed. For classes 1 and 2, changing is the **correct** behaviour
+    #: and staying the same is the violation. Describing this figure as "predictions that
+    #: change under a group swap" inverts its meaning, and that error appeared in four
+    #: documents describing this project before it was caught.
     violation_rate: float
-    class_0_flip_rate: float
+
+    #: Fraction of class-0 predictions that REMAINED class 0 after the mirror.
+    #:
+    #: Renamed from ``class_0_flip_rate``, which said the opposite of what it computes:
+    #: ``(mirrored[class_0_mask] == 0).mean()`` counts rows that stayed, not rows that
+    #: flipped. Class 0 means "neither group profitable", so staying is correct - a name
+    #: implying otherwise makes a good result look like a defect.
+    class_0_stay_rate: float
+
     position_bias: float
     per_class_violation_rate: dict[str, float]
 
@@ -205,7 +222,7 @@ class InvarianceReport:
             "n_rows": self.n_rows,
             "n_violations": self.n_violations,
             "violation_rate": self.violation_rate,
-            "class_0_flip_rate": self.class_0_flip_rate,
+            "class_0_stay_rate": self.class_0_stay_rate,
             "position_bias": self.position_bias,
             "per_class_violation_rate": self.per_class_violation_rate,
         }
@@ -275,15 +292,19 @@ def measure_invariance(
             round(float(violations[mask].mean()), 4) if mask.any() else 0.0
         )
 
+    # Class 0 means "neither group was profitable", which is unchanged by exchanging the
+    # groups. So a class-0 prediction that STAYS class 0 is behaving correctly, and this
+    # measures exactly that. The variable was previously called `class_0_flip`, which named
+    # the opposite of what the expression computes.
     class_0_mask = original == 0
-    class_0_flip = float((mirrored[class_0_mask] == 0).mean()) if class_0_mask.any() else 1.0
+    class_0_stay = float((mirrored[class_0_mask] == 0).mean()) if class_0_mask.any() else 1.0
 
     n_rows = int(original.size)
     return InvarianceReport(
         n_rows=n_rows,
         n_violations=int(violations.sum()),
         violation_rate=round(float(violations.mean()), 4),
-        class_0_flip_rate=round(class_0_flip, 4),
+        class_0_stay_rate=round(class_0_stay, 4),
         position_bias=round(float((original == 1).mean() - (original == 2).mean()), 4),
         per_class_violation_rate=per_class,
     )

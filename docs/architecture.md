@@ -297,14 +297,22 @@ developer machine in Germany (`scripts/measure_latency.py`, raw output in
 Percentiles rather than a mean, because a mean hides the tail and the tail is what times
 out. These include internet round-trip, so service-side latency is lower.
 
-**The cold start is the finding.** Steady-state performance is comfortable — p95 under 100
-ms end-to-end, and the model is loaded once at container startup rather than per request.
-But a scale-to-zero service pays container start, image pull and model deserialisation on
-the first request after an idle period, and here that is **15.5 seconds**.
+**The cold start is the finding.** Steady-state performance is comfortable — **median 129 ms,
+p95 178 ms** end-to-end (`reports/latency.json`), with the model loaded once at container
+startup rather than per request. But a scale-to-zero service pays container start, image pull
+and deserialisation of a 47 MB artifact on the first request after an idle period.
 
-For campaign planning that is defensible: sessions are bursty, one person absorbs a 15-second
-wait once per session, and the alternative is paying for an always-warm instance between
-campaigns. But it is a real trade-off with a name, not an oversight, and it should be
+**How long that takes is *not* something this project has measured repeatably**, and the
+distinction matters. A single observation against a genuinely cold container recorded roughly
+15 seconds; a later run against a service Cloud Run had kept warm recorded 1.2 seconds for its
+first request. Both are in the same file at different times, which is why the honest statement
+is *"of the order of seconds, observed once at ~15 s"* rather than a figure quoted as though
+established. An earlier version of this document quoted 15.5 s and sub-100 ms p95 while
+`latency.json` held different values — a contradiction found in review, not by me.
+
+For campaign planning a slow first request is defensible: sessions are bursty, one person
+absorbs the wait once per session, and the alternative is paying for an always-warm instance
+between campaigns. But it is a real trade-off with a name, not an oversight, and it should be
 revisited if either of two things becomes true — the API acquires a machine consumer that
 retries on timeout, or the frontend's first-load experience is judged unacceptable. The
 lever is `api_min_instances` in `terraform/variables.tf`, currently 0.

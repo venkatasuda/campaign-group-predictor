@@ -97,7 +97,11 @@ class CostMatrix:
         campaign_spend: float,
         profit_if_correct: float,
         opportunity_weight: float = 0.5,
-        currency: str = "EUR",
+        # "relative units", not "EUR". The default was previously a currency code, which
+        # meant every response and every logged decision presented invented ratio-scale
+        # weights as measured financial values. The dataset contains no monetary figures at
+        # all. Pass a real currency code only when the numbers are real.
+        currency: str = "relative units",
     ) -> CostMatrix:
         """Build a cost matrix from three numbers a marketing lead can actually supply.
 

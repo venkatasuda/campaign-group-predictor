@@ -290,12 +290,36 @@ class TestMeasureInvariance:
         assert report.position_bias == 1.0
 
     def test_class_zero_model_is_invariant(self, feature_frame: pd.DataFrame) -> None:
+        """A model predicting only class 0 is perfectly symmetric.
+
+        Class 0 means "neither group profitable", which exchanging the groups cannot change.
+        So every prediction should stay - violation rate 0, stay rate 1. This is the case
+        that makes the naming matter: the old field name `class_0_flip_rate` reported 1.0
+        here, which read as "everything flipped" when nothing flipped and nothing should
+        have.
+        """
+
         def predict(frame: pd.DataFrame) -> np.ndarray:
             return np.zeros(len(frame), dtype=int)
 
         report = measure_invariance(predict, feature_frame)
         assert report.violation_rate == 0.0
-        assert report.class_0_flip_rate == 1.0
+        assert report.class_0_stay_rate == 1.0
+
+    def test_a_model_that_ignores_the_swap_violates_on_classes_one_and_two(
+        self, feature_frame: pd.DataFrame
+    ) -> None:
+        """Pins the direction of the metric, which four documents got backwards.
+
+        A model returning class 1 regardless of input does NOT change when the groups are
+        swapped - and that is a **complete failure**, because the expected mirrored
+        prediction is class 2. Violation rate must be 1.0.
+
+        So "violation" means *failed to transform correctly*, not *changed*. For classes 1
+        and 2, changing is the correct behaviour.
+        """
+        report = measure_invariance(lambda f: np.ones(len(f), dtype=int), feature_frame)
+        assert report.violation_rate == 1.0
 
     def test_summary_flags_position_bias(self, feature_frame: pd.DataFrame) -> None:
         report = measure_invariance(lambda f: np.ones(len(f), dtype=int), feature_frame)
