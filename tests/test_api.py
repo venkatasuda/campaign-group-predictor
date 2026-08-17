@@ -102,6 +102,66 @@ class TestPredictEndpoint:
         assert client.post("/predict", json=valid_payload).status_code == 200
 
 
+class TestUnhandledExceptions:
+    """The catch-all handler: opaque to the caller, complete in the log.
+
+    The four domain handlers translate anticipated failures and their messages are safe
+    because we wrote them. This one catches everything else - a numpy overflow, a shape
+    mismatch - and those messages come from libraries. They can carry file paths, column
+    names and array internals, and this service is unauthenticated.
+    """
+
+    @staticmethod
+    def _exploding_client(client: TestClient) -> TestClient:
+        """A client whose predictor raises something nobody anticipated."""
+        from src.api.dependencies import get_predictor
+
+        def _boom():
+            raise RuntimeError("ndarray shape mismatch at /secret/path/model.pkl column g1_7")
+
+        app = client.app
+        app.dependency_overrides[get_predictor] = _boom
+        # raise_server_exceptions=False makes TestClient return the 500 response rather than
+        # re-raising, which is what a real HTTP client would see.
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_returns_500_without_leaking_the_exception_message(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        exploding = self._exploding_client(client)
+        response = exploding.post("/predict", json=valid_payload)
+
+        assert response.status_code == 500
+        body = response.json()
+
+        assert body["error"] == "InternalServerError"
+        # The library's message must not reach an unauthenticated caller.
+        assert "secret/path" not in body["detail"]
+        assert "ndarray" not in body["detail"]
+        assert "g1_7" not in body["detail"]
+
+        client.app.dependency_overrides.clear()
+
+    def test_the_response_carries_a_request_id_for_diagnosis(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """Opaque is not the same as useless.
+
+        A caller who reports "request abc123 failed" can be answered exactly, because the
+        same ID is bound to the log record carrying the traceback.
+        """
+        exploding = self._exploding_client(client)
+        response = exploding.post(
+            "/predict", json=valid_payload, headers={"X-Request-ID": "abc123"}
+        )
+
+        assert response.status_code == 500
+        assert "abc123" in response.json()["detail"]
+        assert response.headers["X-Request-ID"] == "abc123"
+
+        client.app.dependency_overrides.clear()
+
+
 class TestDecisionLayer:
     def test_decision_block_is_attached_when_probabilities_exist(
         self, client_with_model: TestClient, valid_payload: dict

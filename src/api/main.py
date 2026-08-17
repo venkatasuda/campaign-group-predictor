@@ -57,6 +57,57 @@ def _register_exception_handlers(app: FastAPI) -> None:
         logger.error("Unknown predictor: %s", exc)
         return _envelope(exc, status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    # The catch-all, and the only handler that deliberately does NOT echo the exception.
+    #
+    # The four handlers above translate *anticipated* failures, and their messages are safe
+    # because we wrote them. This one catches everything else - a numpy overflow, a shape
+    # mismatch, a corrupt artifact - and those messages are written by libraries. They can
+    # carry file paths, column names and array internals. Returning `str(exc)` to an
+    # unauthenticated caller turns an incident into disclosure.
+    #
+    # So the response is deliberately opaque and the diagnosis goes to the log, joined by
+    # `request_id`. A caller who reports "request abc123 failed" can be answered exactly;
+    # a caller probing the service learns nothing.
+    #
+    # `exc_info=True` records the traceback in the structured log entry. Without it this
+    # handler would swallow the one piece of information that makes the failure fixable.
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", "unknown")
+        logger.error(
+            "Unhandled %s on %s %s",
+            type(exc).__name__,
+            request.method,
+            request.url.path,
+            exc_info=True,
+            extra={
+                "request_id": request_id,
+                "http_path": request.url.path,
+                "exception_type": type(exc).__name__,
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=ErrorResponse(
+                error="InternalServerError",
+                detail=(
+                    "The request could not be completed. Quote request "
+                    f"{request_id} when reporting this."
+                ),
+            ).model_dump(),
+            # The header is set HERE, not by the correlation-ID middleware, and that is not
+            # duplication.
+            #
+            # Starlette's ServerErrorMiddleware - which invokes this handler - sits *outside*
+            # the user middleware stack. When an exception propagates, `_attach_request_id`
+            # never resumes after `call_next`, so its header assignment never runs. The
+            # result is that X-Request-ID is present on every successful response and absent
+            # on exactly the responses where a caller needs it to report a fault.
+            #
+            # Found by a test asserting the header on a 500 rather than on a 200.
+            headers={"X-Request-ID": request_id},
+        )
+
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and return a configured FastAPI application."""

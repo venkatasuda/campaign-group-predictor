@@ -6,16 +6,41 @@ reaches the model, and they generate the OpenAPI documentation served at ``/docs
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from src.constants import (
+    BASE_FEATURES,
     COMPARISON_FEATURES,
     GROUP_1_FEATURES,
     GROUP_2_FEATURES,
     LEAKAGE_FEATURES,
 )
+
+#: Widest value any feature may take.
+#:
+#: Not a modelling constraint - a sanity bound. The training data lies well inside this, and
+#: a value outside it is a broken upstream join or a unit error, not a campaign. The bound
+#: exists because Pydantic's ``float`` accepts anything IEEE-754 can express: ``1e308``
+#: validates, reaches the pipeline, and overflows during standardisation. The caller then
+#: receives an opaque 500 for what is really a bad request.
+#:
+#: Deliberately loose. A tight bound derived from training quantiles would reject legitimate
+#: drift and turn a monitoring signal into an outage.
+_FEATURE_ABS_LIMIT = 1e6
+
+#: Share of the 67 features that may be null before the request is refused.
+#:
+#: The median imputer will fill anything, silently and confidently - which is the problem. A
+#: request carrying 67 nulls currently returns a prediction indistinguishable from a real
+#: one, and that prediction can allocate budget. Imputation is a tool for the occasional
+#: gap, not a way to manufacture a campaign from nothing.
+#:
+#: 20% is a judgement, stated rather than tuned: below it the model is interpolating within
+#: evidence, above it the answer is mostly the training median wearing a confidence score.
+_MAX_MISSING_FRACTION = 0.20
 
 # Annotated as dict[str, Any] rather than inferred. Pydantic types `json_schema_extra` as
 # a JSON-value mapping, and an inferred dict[str, dict[str, float]] does not satisfy that
@@ -51,7 +76,38 @@ def _validate_keys(
     if unexpected:
         raise ValueError(f"{block_name} contains unexpected key(s): {', '.join(unexpected)}")
 
+    _validate_numeric_range(values, block_name)
     return values
+
+
+def _validate_numeric_range(values: dict[str, float | None], block_name: str) -> None:
+    """Reject NaN, infinity and implausible magnitudes.
+
+    ``None`` is allowed - a genuinely missing value is a legitimate input and the pipeline
+    imputes it. ``NaN`` is not: it is indistinguishable from a missing value downstream but
+    arrives through a different path, usually a failed upstream computation. Accepting both
+    means the caller has two ways to say "no value" and only one of them is deliberate.
+
+    Infinity and extreme magnitudes are rejected here rather than allowed to fail inside the
+    pipeline, because the failure there is an unhandled overflow and the caller sees a 500 -
+    a server error for what is unambiguously a client error.
+    """
+    for key, value in values.items():
+        if value is None:
+            continue
+        if math.isnan(value):
+            raise ValueError(
+                f"{block_name}.{key} is NaN. Use null for a missing value; NaN usually "
+                "indicates a failed computation upstream rather than an absent measurement."
+            )
+        if math.isinf(value):
+            raise ValueError(f"{block_name}.{key} is infinite, which cannot be a measurement.")
+        if abs(value) > _FEATURE_ABS_LIMIT:
+            raise ValueError(
+                f"{block_name}.{key} = {value:g} exceeds the plausible range "
+                f"(|value| <= {_FEATURE_ABS_LIMIT:g}). This is usually a unit error or a "
+                "broken upstream join rather than a real campaign."
+            )
 
 
 class ComparisonRequest(BaseModel):
@@ -92,6 +148,39 @@ class ComparisonRequest(BaseModel):
     @classmethod
     def _check_comparison(cls, value: dict[str, float | None]) -> dict[str, float | None]:
         return _validate_keys(value, COMPARISON_FEATURES, "comparison")
+
+    @model_validator(mode="after")
+    def _check_missingness(self) -> ComparisonRequest:
+        """Refuse a request that is mostly absent.
+
+        This check spans all three blocks, so it cannot live in a field validator - twenty
+        nulls in one block is a different situation from twenty spread across sixty-seven
+        features, and only the whole request shows which one happened.
+
+        Why it matters more than it looks: the pipeline's median imputer fills every gap
+        without complaint, so a request of 67 nulls produces a perfectly well-formed
+        prediction carrying a confidence score - built entirely from training medians. It is
+        indistinguishable from a real answer, and it can allocate budget. **A campaign must
+        never be approved from an empty request.**
+
+        Returning 422 with the count and the threshold makes this a data-quality problem the
+        caller can fix, rather than a silent one nobody notices.
+        """
+        missing = sum(
+            1
+            for block in (self.group_1, self.group_2, self.comparison)
+            for value in block.values()
+            if value is None
+        )
+        limit = int(len(BASE_FEATURES) * _MAX_MISSING_FRACTION)
+
+        if missing > limit:
+            raise ValueError(
+                f"{missing} of {len(BASE_FEATURES)} features are null, above the limit of "
+                f"{limit} ({_MAX_MISSING_FRACTION:.0%}). The prediction would be built "
+                "mostly from training medians rather than from this campaign."
+            )
+        return self
 
 
 class BatchComparisonRequest(BaseModel):

@@ -1,6 +1,15 @@
 # syntax=docker/dockerfile:1
 # Backend prediction API - deployed to Google Cloud Run.
-FROM python:3.11-slim AS base
+#
+# 3.12 is not arbitrary: artifacts/model.pkl was produced on Python 3.12.4, and this image
+# deserialises it. A pickle carries references to the classes that created it, and while
+# unpickling across minor Python versions usually works, "usually" is not a property to rely
+# on for the step between a healthy container and a served prediction.
+#
+# Serving on 3.11 while training on 3.12 was the state before this change. It worked, and it
+# was luck rather than design. The versions in requirements-serve.txt are pinned for the
+# same reason and must move together with this line.
+FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

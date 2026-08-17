@@ -29,14 +29,35 @@
 # The guard against forgetting: /health reports `model_loaded`, and the deploy check in
 # the README asserts it is true before traffic is routed.
 
-# ---- Model loading and inference ----
-pandas>=2.1,<3
-numpy>=1.26,<3
-scipy>=1.11
-scikit-learn>=1.4,<2
-joblib>=1.3
+# Why some lines are pinned exactly and others are not
+# ----------------------------------------------------
+# Pinning everything looks rigorous and quietly declines security patches for packages that
+# cannot affect correctness. The question worth asking of each dependency is: *what must
+# this be identical to?* Only the four that deserialise the pickle have to be identical to
+# anything.
+#
+# EXACT (==): these unpickle the model. A minor version bump can change the internal layout
+# of an estimator, and the failure mode is the worst one available - the image builds, the
+# container starts, /health passes, and the FIRST PREDICTION fails. Health-check-passes-
+# then-fails is precisely what a deployment gate cannot catch.
+#
+# RANGES: the HTTP layer never touches the artifact. Pinning FastAPI exactly buys no safety
+# and blocks CVE fixes in the component most exposed to the internet.
+#
+# Versions below are the ones that produced artifacts/model.pkl on 2026-08-17, recorded in
+# the artifact itself. If you retrain on a different environment, update these together -
+# `make verify-artifact` checks the numbers, not the libraries that made them.
 
-# ---- HTTP layer ----
+# ---- Deserialises the artifact: EXACT ----
+scikit-learn==1.9.0
+numpy==2.5.2
+scipy==1.18.0
+joblib==1.5.3
+
+# ---- Used by the feature adapter, not by the pickle: compatible release ----
+pandas~=2.3.3
+
+# ---- HTTP layer: ranges, so security patches are not blocked ----
 fastapi>=0.110
 uvicorn[standard]>=0.27
 pydantic>=2.6,<3

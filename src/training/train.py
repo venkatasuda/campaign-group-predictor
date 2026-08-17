@@ -814,6 +814,22 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         "n_features_used": int(features.shape[1]),
         "leakage_dropped": not args.keep_leakage,
         "holdout_seed": holdout_seed,
+        # Duplicated from the model artifact, deliberately.
+        #
+        # The artifact already carries these, but reading them requires unpickling it -
+        # which needs the very libraries whose versions you are trying to discover. That is
+        # circular exactly when it matters: someone holding a model.pkl that will not load
+        # and asking what would load it. metrics.json is plain text and answers without
+        # executing anything.
+        #
+        # These four are what requirements-serve.txt pins. If they disagree with that file,
+        # the container is not the environment that produced the model.
+        "environment": {
+            "python": platform.python_version(),
+            "scikit_learn": sklearn.__version__,
+            "numpy": np.__version__,
+            "joblib": joblib.__version__,
+        },
         # Recorded so a reader can verify the protocol rather than take it on trust:
         # exactly one entry in `models` carries test metrics, and it is the champion.
         "evaluation_protocol": (
