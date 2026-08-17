@@ -1,0 +1,51 @@
+# Dependency update monitoring.
+#
+# Monthly rather than weekly, and grouped rather than one PR per package. A bot that opens
+# twenty pull requests a week gets muted, and a muted bot is worse than no bot - it creates
+# the appearance of dependency management without the substance.
+#
+# Security updates are exempt from grouping and arrive immediately, which is the case where
+# noise is worth it.
+
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    groups:
+      # ML libraries move together and break together; reviewing them as one change is
+      # both less work and more honest about how they are actually tested.
+      ml-stack:
+        patterns:
+          - "scikit-learn"
+          - "numpy"
+          - "scipy"
+          - "pandas"
+          - "joblib"
+      web-stack:
+        patterns:
+          - "fastapi"
+          - "uvicorn*"
+          - "pydantic*"
+          - "starlette"
+      dev-tooling:
+        patterns:
+          - "pytest*"
+          - "black"
+          - "ruff"
+          - "httpx"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 2

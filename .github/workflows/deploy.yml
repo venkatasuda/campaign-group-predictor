@@ -1,0 +1,139 @@
+name: Deploy
+
+# Manual by default. Campaign targeting decides budget allocation, so a deploy is a
+# decision someone makes, not a side effect of merging. Uncomment the push trigger once
+# there is a staging environment to absorb the mistake.
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm'
+        required: true
+  # push:
+  #   branches: [main]
+
+env:
+  REGION: europe-west3
+  REPOSITORY: campaign-predictor
+  API_SERVICE: campaign-api
+  FRONTEND_SERVICE: campaign-frontend
+
+jobs:
+  deploy:
+    if: github.event.inputs.confirm == 'deploy'
+    runs-on: ubuntu-latest
+
+    # Required by google-github-actions/auth for Workload Identity Federation. `id-token`
+    # is what lets the job mint a short-lived OIDC token; without it the action falls back
+    # to looking for a service-account key, which is what this setup exists to avoid.
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The model artifact is NOT in git - artifacts/*.pkl is gitignored, deliberately, so
+      # binaries stay out of history. That means a fresh checkout has no model, and
+      # `docker build` would happily produce an image whose COPY finds only .gitkeep.
+      #
+      # The image would start, answer its health probe, and serve the majority-class
+      # fallback. Failing here is the point: a deploy that cannot find an approved model
+      # should stop before it builds, not after it is live.
+      #
+      # In a full setup this step downloads the approved artifact from the model registry
+      # or a versioned GCS bucket. Until that exists it is an explicit, loud gap rather
+      # than a silent one.
+      - name: Fetch the approved model artifact
+        run: |
+          if [ ! -f artifacts/model.pkl ]; then
+            echo "::error::No artifacts/model.pkl present."
+            echo "The artifact is gitignored, so CI must fetch it before building."
+            echo "Wire one of these in, then remove this guard:"
+            echo "  gsutil cp gs://<bucket>/models/<version>/model.pkl artifacts/"
+            echo "  mlflow artifacts download -u <run-uri> -d artifacts/"
+            exit 1
+          fi
+          python -c "import joblib,sys; a=joblib.load('artifacts/model.pkl'); print('model:', a.get('model_name'), 'version:', a.get('model_version'), 'trained:', a.get('trained_at'))"
+
+      # Keyless authentication.
+      #
+      # The alternative - a service-account JSON key in a repository secret - is a
+      # long-lived credential with no expiry, no per-run scope, and no revocation path
+      # short of rotating the key everywhere it is used. Anyone with write access to the
+      # repository can exfiltrate it in a workflow. Workload Identity Federation exchanges
+      # GitHub's OIDC token for a short-lived GCP token scoped to this repository, so
+      # there is no secret to leak.
+      #
+      # One-time setup (not in Terraform because it touches org-level IAM):
+      #   gcloud iam workload-identity-pools create github --location=global
+      #   gcloud iam workload-identity-pools providers create-oidc github \
+      #     --workload-identity-pool=github --issuer-uri=https://token.actions.githubusercontent.com \
+      #     --attribute-mapping=google.subject=assertion.sub,attribute.repository=assertion.repository
+      #   gcloud iam service-accounts add-iam-policy-binding deployer@PROJECT.iam.gserviceaccount.com \
+      #     --role=roles/iam.workloadIdentityUser \
+      #     --member="principalSet://iam.googleapis.com/projects/NUM/locations/global/workloadIdentityPools/github/attribute.repository/ORG/REPO"
+      - id: auth
+        name: Authenticate to Google Cloud (keyless)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
+          service_account: ${{ secrets.DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # Tagged with the commit SHA, never `latest`. A mutable tag makes the deployed
+      # revision unknowable after the fact, so a rollback becomes guesswork.
+      - name: Build and push images
+        run: |
+          BASE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${REPOSITORY}"
+          docker build -t "$BASE/api:${GITHUB_SHA}" .
+          docker build -t "$BASE/frontend:${GITHUB_SHA}" -f Dockerfile.frontend .
+          docker push "$BASE/api:${GITHUB_SHA}"
+          docker push "$BASE/frontend:${GITHUB_SHA}"
+
+      - name: Deploy API
+        run: |
+          BASE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${REPOSITORY}"
+          gcloud run deploy "${API_SERVICE}" \
+            --image "$BASE/api:${GITHUB_SHA}" \
+            --region "${REGION}" \
+            --allow-unauthenticated \
+            --port 8000 \
+            --set-env-vars ALLOW_BASELINE_FALLBACK=false,MODEL_PATH=artifacts/model.pkl
+
+      # The gate that matters.
+      #
+      # Cloud Run reports a deploy as successful as soon as the container answers its
+      # health probe - which it does even when the model artifact never made it into the
+      # image. Without this step the pipeline goes green while the service serves nothing,
+      # and the first person to notice is whoever audits campaign outcomes weeks later.
+      - name: Verify the deployed service is actually serving a model
+        run: |
+          URL=$(gcloud run services describe "${API_SERVICE}" --region "${REGION}" --format='value(status.url)')
+          echo "Checking $URL/health"
+          curl -fsS "$URL/health" | tee /dev/stderr | grep -q '"model_loaded": *true'
+
+      - name: Deploy frontend
+        run: |
+          BASE="${REGION}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${REPOSITORY}"
+          API_URL=$(gcloud run services describe "${API_SERVICE}" --region "${REGION}" --format='value(status.url)')
+          gcloud run deploy "${FRONTEND_SERVICE}" \
+            --image "$BASE/frontend:${GITHUB_SHA}" \
+            --region "${REGION}" \
+            --allow-unauthenticated \
+            --port 8501 \
+            --set-env-vars "API_BASE_URL=${API_URL}"
+
+      - name: Summary
+        run: |
+          {
+            echo "### Deployed \`${GITHUB_SHA::7}\`"
+            echo ""
+            echo "- API: $(gcloud run services describe "${API_SERVICE}" --region "${REGION}" --format='value(status.url)')"
+            echo "- Frontend: $(gcloud run services describe "${FRONTEND_SERVICE}" --region "${REGION}" --format='value(status.url)')"
+            echo "- Model load verified: yes"
+          } >> "$GITHUB_STEP_SUMMARY"

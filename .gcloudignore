@@ -1,0 +1,46 @@
+# IMPORTANT - why this file exists
+#
+# `gcloud run deploy --source .` uploads the local directory to Cloud Build. When no
+# .gcloudignore is present, gcloud DERIVES one from .gitignore. Our .gitignore excludes
+# `artifacts/*.pkl`, so without this file the trained model would be silently dropped
+# from the upload: the build succeeds, the service starts, and /health reports
+# model_loaded=false (or worse, quietly serves the majority-class baseline).
+#
+# This file overrides that behaviour. artifacts/ is deliberately NOT excluded.
+
+.git
+.github
+.gitignore
+
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+
+.pytest_cache
+.ruff_cache
+.coverage
+htmlcov
+
+# Confidential - must never leave the machine
+data/
+
+# Not needed at runtime
+notebooks/
+reports/
+docs/
+tests/
+terraform/
+scripts/
+*.md
+!README.md
+
+.env
+.DS_Store
+docker-compose.yml
+
+# NOTE: Dockerfile.frontend is intentionally NOT excluded - the frontend build needs it.
+
+# NOTE: artifacts/ is intentionally absent from this list - the model must ship.

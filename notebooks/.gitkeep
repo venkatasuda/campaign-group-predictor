@@ -1,0 +1,16 @@
+# Day 1 notebook goes here: 01_eda_and_modelling.ipynb
+#
+# Suggested section order (matches the report):
+#   1. Load data, shape, dtypes, missing values, duplicates
+#   2. ML Q1 - target distribution: % group 1 / group 2 / neither  (+ bar chart)
+#   3. Leakage demonstration - train WITH g1_21/g2_21/c_28, show the inflated score,
+#      then drop them permanently
+#   4. EDA - distributions, correlations, class balance, c_ vs g1_/g2_ relationships
+#   5. Modelling - import build_pipeline/candidate_models from src.training.pipeline
+#   6. Evaluation - confusion matrix, per-class recall, SHAP importances
+#   7. ML Q3 - estimate_business_lift() output and its interpretation
+#
+# Import the shared code rather than re-implementing it, so the notebook and the
+# deployed API provably use the same transformations:
+#   from src.training.pipeline import build_pipeline, candidate_models, split_features_target
+#   from src.training.evaluation import campaign_outcome_distribution, estimate_business_lift

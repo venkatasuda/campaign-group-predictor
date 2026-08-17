@@ -1,0 +1,36 @@
+# Local development stack. Production deploys to two separate Cloud Run services -
+# see `make deploy` and cloudbuild.frontend.yaml.
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      MODEL_PATH: artifacts/model.pkl
+      MODEL_TYPE: sklearn_pipeline
+      # true here, false in production - deliberately.
+      #
+      # Locally a contributor may not have trained yet, and the API should still start so
+      # the schema, docs and frontend can be explored. In production the opposite is
+      # required: silently serving a majority-class baseline while reporting healthy is
+      # the worst available failure mode, so `make deploy` sets this to false and
+      # `make verify-deploy` asserts a real model is loaded.
+      ALLOW_BASELINE_FALLBACK: "true"
+      LOG_LEVEL: INFO
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://api:8000
+    depends_on:
+      # Waits for the API's HEALTHCHECK to pass, not merely for its container to exist.
+      # Without this the frontend starts first, its opening request is refused, and the
+      # user sees a connection error that resolves itself a few seconds later.
+      api:
+        condition: service_healthy

@@ -1,0 +1,43 @@
+# Runtime dependencies for the prediction API - nothing else.
+#
+# Why this file exists
+# --------------------
+# `requirements.txt` is the *development* environment: it installs JupyterLab, Streamlit,
+# matplotlib, pytest, black and ruff so a contributor can run the notebook, the frontend
+# and the test suite from one command. None of those participate in serving a prediction.
+#
+# Shipping them in the API container costs roughly 2 GB of image, a slower cold start on
+# Cloud Run (the image must be pulled before the first request is answered), and a much
+# larger CVE surface for packages the service never imports. A serving image should
+# contain what the service actually loads and nothing more.
+#
+# What decides this list
+# ----------------------
+# The contents are dictated by the champion artifact, not by preference. The current
+# champion is a scikit-learn pipeline (PairwiseFeatureBuilder -> SimpleImputer ->
+# StandardScaler -> RandomForestClassifier), so unpickling it
+# needs scikit-learn, numpy, scipy and joblib; the feature adapter needs pandas; the HTTP
+# layer needs FastAPI, uvicorn and Pydantic.
+#
+# IMPORTANT - if you retrain and the champion changes family
+# ----------------------------------------------------------
+# A pickled CatBoost/LightGBM/XGBoost pipeline cannot be unpickled without its library
+# present. The container would build and start, then fail on the first request - the worst
+# possible failure mode, because health checks pass. If `--champion` selects a boosted
+# model, add the matching line from requirements-optional.txt to this file and rebuild.
+#
+# The guard against forgetting: /health reports `model_loaded`, and the deploy check in
+# the README asserts it is true before traffic is routed.
+
+# ---- Model loading and inference ----
+pandas>=2.1,<3
+numpy>=1.26,<3
+scipy>=1.11
+scikit-learn>=1.4,<2
+joblib>=1.3
+
+# ---- HTTP layer ----
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.6,<3
+pydantic-settings>=2.2

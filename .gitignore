@@ -1,0 +1,56 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+
+.ipynb_checkpoints/
+
+# Data is not redistributable - keep it local
+data/*.csv
+!data/.gitkeep
+
+# Model artifacts
+artifacts/*.pkl
+artifacts/*.joblib
+!artifacts/.gitkeep
+
+# Scratch experiment outputs. `artifacts/` is the ONE canonical result; these are earlier
+# runs under different flags kept for local comparison. Committing them recreates the
+# problem the project spent effort eliminating - several directories each containing a
+# plausible "final" model, with no way for a reader to tell which one the report describes.
+artifacts_tuned/
+artifacts_verify/
+artifacts_*/
+!artifacts/
+
+# Notebook scratch copies. A stale duplicate of the analysis is worse than no copy: it
+# contains every conclusion that was later corrected.
+notebooks/Backup.ipynb
+notebooks/*-checkpoint.ipynb
+notebooks/convert.ipynb
+
+# MLflow local tracking store. Run history belongs in a tracking server, not in git -
+# committing it would put binary model copies in every clone.
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Terraform. The lockfile IS committed - it is what makes provider resolution
+# reproducible across machines and CI. State and tfvars are not: state contains resource
+# metadata, and tfvars contains project identifiers.
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.tfplan
+terraform/crash.log
+
+.env
+.DS_Store

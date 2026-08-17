@@ -1,0 +1,13 @@
+{
+  "url": "https://campaign-api-395867964283.europe-west3.run.app",
+  "endpoint": "/predict",
+  "n_requests": 50,
+  "n_failures": 0,
+  "first_request_ms": 747.8,
+  "min_ms": 142.6,
+  "median_ms": 181.1,
+  "mean_ms": 182.6,
+  "p95_ms": 215.8,
+  "p99_ms": 252.9,
+  "max_ms": 252.9
+}

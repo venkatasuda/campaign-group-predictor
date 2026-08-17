@@ -1,0 +1,112 @@
+{
+  "nested_cv": [
+    {
+      "model_name": "xgboost",
+      "nested_mean": 0.5899,
+      "nested_std": 0.0026,
+      "outer_scores": [
+        0.5877,
+        0.594,
+        0.5864,
+        0.5911,
+        0.5902
+      ],
+      "outer_splits": 5,
+      "inner_splits": 3,
+      "n_candidates": 20,
+      "scoring": "accuracy",
+      "strategy": "random"
+    },
+    {
+      "model_name": "random_forest",
+      "nested_mean": 0.5816,
+      "nested_std": 0.0095,
+      "outer_scores": [
+        0.567,
+        0.5826,
+        0.576,
+        0.5949,
+        0.5873
+      ],
+      "outer_splits": 5,
+      "inner_splits": 3,
+      "n_candidates": 20,
+      "scoring": "accuracy",
+      "strategy": "random"
+    }
+  ],
+  "representation": [
+    {
+      "representation": "production pipeline (67 + derived)",
+      "n_features": 67,
+      "derived_features_added": true,
+      "cv_mean": 0.5699,
+      "cv_std": 0.0067
+    },
+    {
+      "representation": "all 67, no derived features",
+      "n_features": 67,
+      "derived_features_added": false,
+      "cv_mean": 0.5702,
+      "cv_std": 0.0047
+    },
+    {
+      "representation": "comparison block c_ only",
+      "n_features": 27,
+      "derived_features_added": false,
+      "cv_mean": 0.5719,
+      "cv_std": 0.0064
+    },
+    {
+      "representation": "group levels only",
+      "n_features": 40,
+      "derived_features_added": false,
+      "cv_mean": 0.5127,
+      "cv_std": 0.0057
+    },
+    {
+      "representation": "contrasts only (g1_i - g2_i)",
+      "n_features": 20,
+      "derived_features_added": false,
+      "cv_mean": 0.5108,
+      "cv_std": 0.0162
+    },
+    {
+      "representation": "group levels + contrasts",
+      "n_features": 60,
+      "derived_features_added": false,
+      "cv_mean": 0.5168,
+      "cv_std": 0.0056
+    }
+  ],
+  "minimal_feature_sets": [
+    {
+      "representation": "top 1 (clean ranking)",
+      "n_features": 1,
+      "derived_features_added": false,
+      "cv_mean": 0.5944,
+      "cv_std": 0.0058
+    },
+    {
+      "representation": "top 3 (clean ranking)",
+      "n_features": 3,
+      "derived_features_added": false,
+      "cv_mean": 0.5691,
+      "cv_std": 0.0065
+    },
+    {
+      "representation": "top 5 (clean ranking)",
+      "n_features": 5,
+      "derived_features_added": false,
+      "cv_mean": 0.5591,
+      "cv_std": 0.0036
+    },
+    {
+      "representation": "top 10 (clean ranking)",
+      "n_features": 10,
+      "derived_features_added": false,
+      "cv_mean": 0.5621,
+      "cv_std": 0.0037
+    }
+  ]
+}

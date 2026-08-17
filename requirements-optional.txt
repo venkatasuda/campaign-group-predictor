@@ -1,0 +1,27 @@
+# Optional dependencies - stronger models and richer explanations.
+#
+# Every import of these is guarded in the source, so the project trains, serves and
+# passes its tests without them:
+#
+#   * catboost / lightgbm / xgboost  -> the model zoo silently shrinks to
+#     logistic regression, random forest, HistGradientBoosting and the MLP
+#   * shap                           -> explainability falls back to permutation
+#     importance, which is model-agnostic and always available
+#
+# They are separated from requirements.txt because these packages are the most likely
+# to lack a prebuilt wheel for a brand-new Python release, and a source build needs a
+# C++ toolchain. A missing compiler should never block the core project.
+#
+# Install after the core requirements:
+#     pip install -r requirements-optional.txt
+#
+# If any single package fails, install the others individually - each is independent:
+#     pip install lightgbm
+#     pip install xgboost
+#     pip install catboost
+#     pip install shap
+
+lightgbm>=4.3
+xgboost>=2.0
+catboost>=1.2
+shap>=0.45

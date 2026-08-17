@@ -1,0 +1,201 @@
+# Continuous integration.
+#
+# Scope note: this pipeline validates the *code*, not the model. Training is deliberately
+# absent, because the dataset is LP-Internal and is never committed - so CI has no data to
+# train on, by design. That constraint is the reason the test suite is built on synthetic
+# fixtures rather than on the real CSV: it is what makes the code verifiable by a machine
+# that is not allowed to see the data.
+#
+# The jobs run in parallel where they are independent, and the container smoke test depends
+# on the image build because it consumes its output.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# A new push to the same branch cancels the previous run - the older result is about to be
+# superseded and there is no reason to pay for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # 3.12 rather than the package floor of 3.10: NumPy's bundled stubs use PEP 695 syntax
+  # that older interpreters cannot parse, so mypy fails on 3.10 for reasons unrelated to
+  # this codebase. See the comment in pyproject.toml.
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # --------------------------------------------------------------------------- guardrails
+  # Runs first and alone. If confidential data has reached the repository, nothing else
+  # about this commit matters - and the answer is needed before anyone reads a test result.
+  data-guard:
+    name: No confidential data committed
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The check inspects history, not just the working tree: deleting a file in a
+          # later commit does not remove it from earlier ones, and a clone still carries it.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Assert the dataset is absent from the tree and from history
+        run: python scripts/check_no_data_committed.py
+
+  # ------------------------------------------------------------------------------ quality
+  lint:
+    name: Lint, format and types
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: ruff
+        run: python -m ruff check src tests frontend scripts
+
+      # --check, not a rewrite. CI reports; it does not silently modify the commit under
+      # test, which would make the artifact differ from what the author reviewed.
+      - name: black
+        run: python -m black --check --diff src tests frontend scripts
+
+      - name: mypy
+        run: python -m mypy
+
+  test:
+    name: Tests and coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      # The optional boosted-tree and SHAP packages widen the model zoo from four families
+      # to seven. Every import of them is guarded, so the suite passes without them - but
+      # installing them here means CI exercises the guarded paths rather than skipping them.
+      - name: Install optional model libraries
+        run: python -m pip install -r requirements-optional.txt
+
+      # The coverage floor lives in pyproject.toml so `pytest` behaves identically on a
+      # laptop and here. A gate that exists only in CI teaches people to push and wait.
+      - name: pytest
+        run: python -m pytest --cov=src --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          if-no-files-found: warn
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install auditing tools
+        run: python -m pip install pip-audit bandit
+
+      # Audits the *serving* requirements rather than the development set, so a finding
+      # concerns something that actually reaches production. A CVE in a linter is noise.
+      - name: pip-audit (serving dependencies)
+        run: python -m pip_audit --requirement requirements-serve.txt --strict
+
+      # -ll reports medium and high severity only. Low-severity bandit findings on a
+      # codebase like this are almost entirely assert statements in tests.
+      - name: bandit
+        run: python -m bandit -r src -ll
+
+  # ------------------------------------------------------------------------------- deploy
+  docker:
+    name: Image build and container smoke test
+    runs-on: ubuntu-latest
+    # No point building an image from code that does not lint or pass its tests.
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true          # keep the image in the local daemon so it can be run below
+          tags: campaign-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # A build that succeeds proves the image assembles. It does not prove the application
+      # starts - a missing runtime dependency or a bad entrypoint fails only on boot. This
+      # is the cheapest check that distinguishes the two.
+      #
+      # ALLOW_BASELINE_FALLBACK=true is required and is not a workaround: artifacts/*.pkl is
+      # gitignored, so CI has no trained model. The container must still come up and answer
+      # honestly - which is exactly what /health reporting a degraded state means.
+      - name: Start the container
+        run: |
+          docker run -d --name api -p 8000:8000 \
+            -e ALLOW_BASELINE_FALLBACK=true \
+            campaign-api:ci
+
+      - name: Wait for /health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://localhost:8000/health > /tmp/health.json 2>/dev/null; then
+              echo "Service answered after ${attempt}s:"
+              cat /tmp/health.json
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Service did not become healthy within 30s."
+          docker logs api
+          exit 1
+
+      - name: Assert the API serves a prediction
+        run: |
+          python -m pip install requests
+          python scripts/measure_latency.py --url http://localhost:8000 --requests 10 --warmup 2
+
+      - name: Container logs
+        if: always()
+        run: docker logs api || true
+
+      - name: Stop
+        if: always()
+        run: docker rm -f api || true

@@ -1,0 +1,51 @@
+# Quality and safety gates that run before a commit is created.
+#
+#   pip install pre-commit && pre-commit install
+#
+# CI runs the same linters, so these hooks are not the only line of defence for formatting.
+# The one that is load-bearing is `block-confidential-data` below.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      # A model artifact is a build output, not source. Committing one puts a binary in
+      # every clone forever and makes provenance unanswerable.
+      - id: check-added-large-files
+        args: [--maxkb=2048]
+      # Private keys in a repository are the single most expensive commit to undo.
+      - id: detect-private-key
+
+  - repo: local
+    hooks:
+      # The dataset is confidential and must not leave the machine. .gitignore already
+      # excludes data/*.csv - but .gitignore is advisory. `git add -f` overrides it
+      # silently, and once a file is in history, removing it means rewriting every commit
+      # after it and rotating whatever it exposed.
+      #
+      # This hook is not advisory. It inspects what is actually staged and refuses the
+      # commit. The rule the project cares about most is the one that should be mechanical
+      # rather than remembered.
+      - id: block-confidential-data
+        name: Block dataset files from being committed
+        entry: python scripts/check_no_data_committed.py
+        language: system
+        pass_filenames: true
+        always_run: true

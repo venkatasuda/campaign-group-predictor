@@ -1,0 +1,22 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+project_id = "your-gcp-project-id"
+region     = "europe-west3"
+
+# Push the images first, then reference them here.
+#
+# Prefer an immutable digest or a commit SHA over ":latest". With a mutable tag, the state
+# file records that *a* tag is deployed but not *which build* - so the deployed revision
+# becomes unknowable from the configuration, which is the thing declaring it was meant to
+# fix. A rollback then means guessing.
+#
+#   api_image = "europe-west3-docker.pkg.dev/PROJECT/campaign-predictor/api@sha256:abc..."
+api_image      = "europe-west3-docker.pkg.dev/your-gcp-project-id/campaign-predictor/api:v1.0.0"
+frontend_image = "europe-west3-docker.pkg.dev/your-gcp-project-id/campaign-predictor/frontend:v1.0.0"
+
+# true so reviewers can open the URLs. false in production, behind API Gateway or IAP.
+allow_unauthenticated = true
+
+# Keep false. See variables.tf for why a healthy service quietly serving a baseline is
+# worse than a service that refuses to start.
+allow_baseline_fallback = false

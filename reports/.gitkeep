@@ -1,0 +1,10 @@
+# Final report or presentation goes here (Day 4).
+# Suggested structure:
+#   1. Problem & business framing
+#   2. Data overview + the leakage finding
+#   3. ML Q1 - campaign outcome percentages
+#   4. Modelling approach & results
+#   5. ML Q3 - business lift + validation plan
+#   6. Architecture + sequence diagrams (from docs/architecture.md)
+#   7. Deployed API & frontend walkthrough with live URLs
+#   8. Limitations & next steps

@@ -1,0 +1,2 @@
+# Trained model artifacts are written here by `make train`.
+# The .pkl files themselves are git-ignored.

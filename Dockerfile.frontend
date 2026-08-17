@@ -1,0 +1,27 @@
+# syntax=docker/dockerfile:1
+# Streamlit frontend - deployed as a second Cloud Run service.
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+RUN pip install --upgrade pip && \
+    pip install streamlit==1.40.2 requests==2.32.3 pandas==2.2.3
+
+COPY frontend ./frontend
+
+RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+ENV PORT=8501 \
+    API_BASE_URL=http://localhost:8000
+
+EXPOSE 8501
+
+CMD exec streamlit run frontend/app.py \
+    --server.port=${PORT} \
+    --server.address=0.0.0.0 \
+    --server.headless=true

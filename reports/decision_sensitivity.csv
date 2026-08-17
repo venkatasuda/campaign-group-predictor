@@ -1,0 +1,4 @@
+scenario,cost/campaign — argmax,cost/campaign — decision rule,saving/campaign,decisions differing,flagged for review
+balanced (spend = profit),-0.106118,-0.111405,0.005287,38,0.0755
+expensive campaigns (spend = 2× profit),0.284366,0.171073,0.113293,614,0.0695
+high upside (profit = 3× spend),-1.09932,-1.250755,0.151435,109,0.0174
