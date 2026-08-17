@@ -33,8 +33,25 @@ streamlit>=1.32
 requests>=2.31
 
 # ---- Testing / quality ----
+#
+# Every tool the Makefile and CI invoke must be declared here. `mypy` was previously
+# installed ad hoc in a local virtualenv and worked for months on one machine while being
+# absent from the manifest - so `make lint` passed locally and the CI lint job failed on
+# "No module named mypy" the first time it ran.
+#
+# The rule that avoids this class of problem: if a command appears in the Makefile or a
+# workflow, its package appears in a requirements file. An undeclared dependency is not a
+# dependency, it is a property of one developer's laptop.
 pytest>=8.0
 pytest-cov>=5.0
 httpx>=0.27
 black>=24.0
 ruff>=0.5
+mypy>=1.10
+
+# Security auditing. `make security` and the CI security job call these.
+#   pip-audit  - known CVEs in the SERVING dependency set, not the development one, so a
+#                finding concerns something that actually reaches production
+#   bandit     - common security mistakes in our own code
+pip-audit>=2.7
+bandit>=1.7
