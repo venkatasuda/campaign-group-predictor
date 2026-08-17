@@ -1,11 +1,17 @@
 {
-  "generated_at": "2026-08-17T07:20:44.974805+00:00",
+  "generated_at": "2026-08-17T18:40:31.817745+00:00",
   "dataset": "data/customerGroups.csv",
   "dataset_sha256": "041f3d619b85b5fb8b1c2bf9dde7c1ff1eb8e30df1ad6d4a5d4a168012ed35a1",
   "n_rows": 6620,
   "n_features_used": 67,
   "leakage_dropped": true,
   "holdout_seed": 20260819,
+  "environment": {
+    "python": "3.12.4",
+    "scikit_learn": "1.9.0",
+    "numpy": "2.5.2",
+    "joblib": "1.5.3"
+  },
   "evaluation_protocol": "Candidates compared on cross-validation only. The test set was evaluated once, on the locked champion, after selection. The test set is then READ several times to report different quantities (metrics, symmetry, calibration, policy, drift) - but no choice depends on any of them. 'Selected on once' is the property that matters; 'read once' would be false.",
   "symmetry_augmented": false,
   "negate_columns": [
@@ -21,7 +27,7 @@
     "review_margin": 0.05,
     "exploration_rate": 0.0,
     "cost_matrix": {
-      "currency": "EUR",
+      "currency": "relative units",
       "costs": {
         "true_no_group_profitable": {
           "do_not_run": 0.0,
@@ -387,7 +393,7 @@
         "n_rows": 1324,
         "n_violations": 712,
         "violation_rate": 0.5378,
-        "class_0_flip_rate": 0.2477,
+        "class_0_stay_rate": 0.2477,
         "position_bias": 0.2863,
         "per_class_violation_rate": {
           "predicted_0": 0.7523,
@@ -469,7 +475,7 @@
         "n_campaigns": 1324,
         "exploration_decisions": 0,
         "exploration_rate_realised": 0.0,
-        "currency": "EUR",
+        "currency": "relative units",
         "total_cost_policy": -147.5,
         "total_cost_argmax": -140.5,
         "total_cost_perfect": -991.0,
@@ -490,7 +496,7 @@
           "review_margin": 0.05,
           "exploration_rate": 0.0,
           "cost_matrix": {
-            "currency": "EUR",
+            "currency": "relative units",
             "costs": {
               "true_no_group_profitable": {
                 "do_not_run": 0.0,
@@ -510,6 +516,20 @@
             }
           }
         }
+      },
+      "deployed_policy_performance": {
+        "note": "The cost-sensitive action the API recommends when ENABLE_DECISION_LAYER is true. Compare against the classifier metrics above, which describe argmax.",
+        "accuracy": 0.5514,
+        "balanced_accuracy": 0.4774,
+        "f1_macro": 0.4355,
+        "per_class_recall": {
+          "0": 0.048,
+          "1": 0.8098,
+          "2": 0.5745
+        },
+        "absolute_lift_pp": 8.69,
+        "actions_differing_from_argmax": 38,
+        "class_0_recall_delta_vs_argmax": -0.036
       },
       "calibration_comparison": {
         "method": "isotonic",
@@ -664,227 +684,228 @@
         "permutation_importance_top": [
           {
             "feature": "c_2",
-            "importance_mean": 0.032066,
-            "importance_std": 0.006966,
+            "importance_mean": 0.064659,
+            "importance_std": 0.007854,
             "rank": 1
           },
           {
-            "feature": "g1_1",
-            "importance_mean": 0.006082,
-            "importance_std": 0.005193,
+            "feature": "c_4",
+            "importance_mean": 0.01568,
+            "importance_std": 0.006637,
             "rank": 2
           },
           {
-            "feature": "g1_10",
-            "importance_mean": 0.00518,
-            "importance_std": 0.002318,
+            "feature": "g1_18",
+            "importance_mean": 0.011323,
+            "importance_std": 0.003585,
             "rank": 3
           },
           {
-            "feature": "g2_18",
-            "importance_mean": 0.004874,
-            "importance_std": 0.001917,
+            "feature": "g1_8",
+            "importance_mean": 0.01116,
+            "importance_std": 0.002333,
             "rank": 4
           },
           {
-            "feature": "g2_17",
-            "importance_mean": 0.004712,
-            "importance_std": 0.002915,
+            "feature": "g2_8",
+            "importance_mean": 0.010295,
+            "importance_std": 0.002586,
             "rank": 5
           },
           {
-            "feature": "g2_10",
-            "importance_mean": 0.004699,
-            "importance_std": 0.002814,
+            "feature": "g2_2",
+            "importance_mean": 0.01017,
+            "importance_std": 0.00482,
             "rank": 6
           },
           {
-            "feature": "g1_16",
-            "importance_mean": 0.004676,
-            "importance_std": 0.002072,
+            "feature": "g2_1",
+            "importance_mean": 0.009951,
+            "importance_std": 0.009058,
             "rank": 7
           },
           {
-            "feature": "g2_14",
-            "importance_mean": 0.004669,
-            "importance_std": 0.002433,
+            "feature": "g1_10",
+            "importance_mean": 0.009857,
+            "importance_std": 0.004046,
             "rank": 8
           },
           {
-            "feature": "c_18",
-            "importance_mean": 0.004392,
-            "importance_std": 0.002319,
+            "feature": "g2_3",
+            "importance_mean": 0.008534,
+            "importance_std": 0.002287,
             "rank": 9
           },
           {
-            "feature": "c_1",
-            "importance_mean": 0.004346,
-            "importance_std": 0.002674,
+            "feature": "c_19",
+            "importance_mean": 0.008443,
+            "importance_std": 0.003775,
             "rank": 10
           },
           {
-            "feature": "g1_7",
-            "importance_mean": 0.004325,
-            "importance_std": 0.002404,
+            "feature": "g2_4",
+            "importance_mean": 0.008345,
+            "importance_std": 0.00274,
             "rank": 11
           },
           {
-            "feature": "g2_16",
-            "importance_mean": 0.004308,
-            "importance_std": 0.002806,
+            "feature": "c_11",
+            "importance_mean": 0.008179,
+            "importance_std": 0.003843,
             "rank": 12
           },
           {
-            "feature": "g2_13",
-            "importance_mean": 0.003935,
-            "importance_std": 0.004011,
+            "feature": "c_15",
+            "importance_mean": 0.007952,
+            "importance_std": 0.000953,
             "rank": 13
           },
           {
-            "feature": "c_27",
-            "importance_mean": 0.003787,
-            "importance_std": 0.002613,
+            "feature": "c_25",
+            "importance_mean": 0.007929,
+            "importance_std": 0.002943,
             "rank": 14
           },
           {
-            "feature": "c_15",
-            "importance_mean": 0.003442,
-            "importance_std": 0.002061,
+            "feature": "g1_6",
+            "importance_mean": 0.007666,
+            "importance_std": 0.003733,
             "rank": 15
           },
           {
-            "feature": "g1_11",
-            "importance_mean": 0.003331,
-            "importance_std": 0.002942,
+            "feature": "g2_13",
+            "importance_mean": 0.007609,
+            "importance_std": 0.002997,
             "rank": 16
           },
           {
-            "feature": "g1_14",
-            "importance_mean": 0.003278,
-            "importance_std": 0.002245,
+            "feature": "g2_19",
+            "importance_mean": 0.007377,
+            "importance_std": 0.004328,
             "rank": 17
           },
           {
-            "feature": "g2_6",
-            "importance_mean": 0.002931,
-            "importance_std": 0.003692,
+            "feature": "g1_17",
+            "importance_mean": 0.007355,
+            "importance_std": 0.004865,
             "rank": 18
           },
           {
-            "feature": "c_22",
-            "importance_mean": 0.002799,
-            "importance_std": 0.001736,
+            "feature": "g1_15",
+            "importance_mean": 0.006852,
+            "importance_std": 0.00456,
             "rank": 19
           },
           {
-            "feature": "c_20",
-            "importance_mean": 0.00241,
-            "importance_std": 0.003211,
+            "feature": "g2_18",
+            "importance_mean": 0.006714,
+            "importance_std": 0.001813,
             "rank": 20
           }
         ],
         "shap_importance_top": [
           {
             "feature": "c_2",
-            "mean_abs_shap": 0.044147,
+            "mean_abs_shap": 0.047849,
             "rank": 1
           },
           {
-            "feature": "c_4",
-            "mean_abs_shap": 0.012517,
+            "feature": "diff_1",
+            "mean_abs_shap": 0.012087,
             "rank": 2
           },
           {
-            "feature": "diff_1",
-            "mean_abs_shap": 0.011755,
+            "feature": "ratio_1",
+            "mean_abs_shap": 0.011886,
             "rank": 3
           },
           {
-            "feature": "ratio_1",
-            "mean_abs_shap": 0.010999,
+            "feature": "c_4",
+            "mean_abs_shap": 0.011818,
             "rank": 4
           },
           {
             "feature": "g1_1",
-            "mean_abs_shap": 0.009887,
+            "mean_abs_shap": 0.010691,
             "rank": 5
           },
           {
             "feature": "g2_1",
-            "mean_abs_shap": 0.009509,
+            "mean_abs_shap": 0.010076,
             "rank": 6
           },
           {
             "feature": "c_26",
-            "mean_abs_shap": 0.005448,
+            "mean_abs_shap": 0.005088,
             "rank": 7
           },
           {
-            "feature": "c_19",
-            "mean_abs_shap": 0.00417,
+            "feature": "c_25",
+            "mean_abs_shap": 0.004284,
             "rank": 8
           },
           {
-            "feature": "c_25",
-            "mean_abs_shap": 0.004141,
+            "feature": "c_19",
+            "mean_abs_shap": 0.003853,
             "rank": 9
           },
           {
             "feature": "diff_12",
-            "mean_abs_shap": 0.003509,
+            "mean_abs_shap": 0.003601,
             "rank": 10
           },
           {
-            "feature": "c_9",
-            "mean_abs_shap": 0.002943,
+            "feature": "diff_13",
+            "mean_abs_shap": 0.003078,
             "rank": 11
           },
           {
-            "feature": "ratio_15",
-            "mean_abs_shap": 0.002896,
+            "feature": "g2_17",
+            "mean_abs_shap": 0.003074,
             "rank": 12
           },
           {
-            "feature": "diff_13",
-            "mean_abs_shap": 0.002787,
+            "feature": "ratio_15",
+            "mean_abs_shap": 0.003034,
             "rank": 13
           },
           {
-            "feature": "g2_17",
-            "mean_abs_shap": 0.002584,
+            "feature": "c_9",
+            "mean_abs_shap": 0.002852,
             "rank": 14
           },
           {
             "feature": "c_20",
-            "mean_abs_shap": 0.002565,
+            "mean_abs_shap": 0.002801,
             "rank": 15
           },
           {
-            "feature": "g2_13",
-            "mean_abs_shap": 0.00231,
+            "feature": "diff_14",
+            "mean_abs_shap": 0.002511,
             "rank": 16
           },
           {
-            "feature": "c_21",
-            "mean_abs_shap": 0.002133,
+            "feature": "g2_13",
+            "mean_abs_shap": 0.002494,
             "rank": 17
           },
           {
-            "feature": "c_12",
-            "mean_abs_shap": 0.00211,
+            "feature": "c_21",
+            "mean_abs_shap": 0.00234,
             "rank": 18
           },
           {
-            "feature": "c_1",
-            "mean_abs_shap": 0.00209,
+            "feature": "c_3",
+            "mean_abs_shap": 0.00228,
             "rank": 19
           },
           {
-            "feature": "diff_15",
-            "mean_abs_shap": 0.002051,
+            "feature": "c_12",
+            "mean_abs_shap": 0.002221,
             "rank": 20
           }
-        ]
+        ],
+        "computed_on": "calibration"
       }
     },
     "hist_gradient_boosting": {

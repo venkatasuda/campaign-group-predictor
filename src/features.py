@@ -57,9 +57,32 @@ class PairwiseFeatureBuilder(BaseEstimator, TransformerMixin):
     add_differences:
         Add ``diff_i = g1_i - g2_i`` for every paired variable.
     add_ratios:
-        Add ``ratio_i = g1_i / (g2_i + epsilon)`` for every paired variable.
+        Add ``ratio_i = g1_i / (|g2_i| + epsilon)`` for every paired variable.
+
+        **Note the absolute value in the denominator, and treat these features with
+        suspicion.** The docstring previously described ``g1_i / (g2_i + epsilon)``, which is
+        not what the code computes - a documentation error worth recording rather than
+        quietly correcting, because the two behave differently and the difference matters:
+
+        * ``abs()`` makes the denominator sign-free, so ``g1 / |g2|`` loses the sign
+          relationship between the two groups. For columns where ``g2`` takes negative
+          values - several do - the resulting feature is not "the ratio of group 1 to group
+          2" in any interpretable sense.
+        * Where ``g2`` is near zero, the ratio explodes. ``epsilon`` prevents a division
+          error, not a meaningless magnitude: an exact zero yields ``g1 / 1e-6``, a value in
+          the millions standing next to features on a unit scale.
+        * The columns are anonymised, so there is no basis for assuming a ratio is a
+          meaningful operation on them at all. A difference is defensible for any pair of
+          comparable quantities; a ratio assumes a common zero point.
+
+        The measured verdict supports the suspicion: with ratios 0.5699, without 0.5702.
+        They add nothing on this dataset. They are retained only because removing them
+        changes the artifact and therefore every reported number, and the honest note is
+        that a clean rebuild should drop them unless a development-only ablation shows they
+        help consistently.
     epsilon:
-        Numerical guard used in the ratio denominator.
+        Numerical guard used in the ratio denominator. Prevents division by zero; does not
+        prevent an implausibly large result when the denominator is near zero.
     """
 
     def __init__(

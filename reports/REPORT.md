@@ -22,6 +22,13 @@ That figure is an **estimated improvement in offline targeting decisions on hist
 data**, not a measured ROI gain. The dataset contains no monetary values, so no euro figure
 can honestly be derived from it.
 
+**It also describes the classifier, which is what the service ships.** A cost-sensitive
+decision layer is implemented but **disabled by default**: with the assumed cost weights it
+raises accuracy by 0.31 points while cutting class-0 recall from 8.4% to 4.8%, so it trades
+away the capability that matters most in exchange for a difference inside noise. Both
+behaviours are measured and recorded (§4.5); enabling it is a decision for whoever supplies
+real cost figures.
+
 Four findings matter more than the headline number.
 
 **The features, not the algorithm, are the constraint.** Seven model families spanning
@@ -446,6 +453,44 @@ Confirming the real spend-to-margin ratio with the marketing team is the cheapes
 improvement to this system: it costs one conversation and it changes the recommended action
 on a measurable share of campaigns. They are configuration (`CAMPAIGN_SPEND`,
 `PROFIT_IF_CORRECT`, `OPPORTUNITY_WEIGHT`), not code.
+
+#### What the policy actually does — and why it ships disabled
+
+**Every headline number in this report describes the classifier's `argmax`.** With the
+decision layer enabled the API recommends something different on some campaigns, so the
+figure that is reported and the behaviour that is deployed are not the same thing. Until
+recently only the first was measured. Both now are:
+
+| | Accuracy | Class-0 recall | Class-1 | Class-2 |
+|---|---|---|---|---|
+| **Classifier (`argmax`)** | 54.83% | **8.4%** | 0.797 | 0.553 |
+| **Policy under the assumed costs** | **55.14%** | **4.8%** | — | — |
+| Difference | +0.31 pp | **−3.6 pp** | | |
+
+The policy changes the action on **38 of 1,324** campaigns. It buys **0.31 points of
+accuracy** and gives up **43% of the model's already-weak ability to identify unprofitable
+campaigns** — the capability this report repeatedly calls the most valuable one.
+
+**The mechanism is the cost matrix, and it is doing exactly what it was told.** Declining a
+campaign that would have paid off costs +0.5, while targeting the wrong group costs +1.0. So
+"do not run" only wins when the model is quite confident of class 0 — and since it rarely is,
+the expected-cost rule declines *less often* than `argmax` does. The assumed weights make the
+system more aggressive, in precisely the dimension where the data says it should be more
+cautious.
+
+**That is the argument for the default.** The layer is not wrong — the structure is right and
+the arithmetic is right. But it converts probabilities into a euro-denominated
+recommendation using three numbers this project invented, and with those numbers it degrades
+the capability that matters. So `ENABLE_DECISION_LAYER` defaults to **false**, and the
+reported metrics describe what the service actually does.
+
+Enable it when the marketing team supplies real figures — and re-run this comparison then,
+because a different `opportunity_weight` may reverse the trade entirely. That is the point of
+measuring the policy rather than assuming it inherits the classifier's properties.
+
+*(An independent reviewer computed 55.14% and 4.80% from the shipped artifact before this
+comparison existed in the code. The figures above are reproduced by
+`src/training/train.py` and stored in `metrics.json` under `deployed_policy_performance`.)*
 
 Near-ties are flagged `review_required` and routed to a person rather than automated. The
 service never suppresses that decision silently — the flag is part of the API response.

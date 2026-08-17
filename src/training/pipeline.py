@@ -19,7 +19,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.constants import BASE_FEATURES, LEAKAGE_FEATURES, TARGET_COLUMN
+from src.constants import BASE_FEATURES, CLASS_LABELS, LEAKAGE_FEATURES, TARGET_COLUMN
 from src.features import PairwiseFeatureBuilder
 from src.logging_config import get_logger
 
@@ -103,7 +103,40 @@ def split_features_target(
     if TARGET_COLUMN not in frame.columns:
         raise KeyError(f"Dataset does not contain the '{TARGET_COLUMN}' column.")
 
-    target = frame[TARGET_COLUMN].astype(int)
+    # The target is validated before it is coerced, not after.
+    #
+    # `.astype(int)` is silent and lossy: it turns 1.7 into 1, NaN into a platform-dependent
+    # sentinel, and "2" into 2. Any of those means the file is not what this pipeline
+    # assumes, and every metric computed downstream would be arithmetically valid and
+    # meaningless. A training job that inherits a corrupted label column should stop, not
+    # produce a model.
+    raw_target = frame[TARGET_COLUMN]
+    if raw_target.isna().any():
+        raise ValueError(
+            f"'{TARGET_COLUMN}' contains {int(raw_target.isna().sum())} null value(s). "
+            "The label cannot be imputed - a campaign with an unknown outcome is not a "
+            "training example."
+        )
+
+    numeric_target = pd.to_numeric(raw_target, errors="coerce")
+    if numeric_target.isna().any():
+        bad = raw_target[numeric_target.isna()].unique()[:5]
+        raise ValueError(f"'{TARGET_COLUMN}' contains non-numeric value(s): {list(bad)}.")
+
+    if not (numeric_target == numeric_target.round()).all():
+        raise ValueError(
+            f"'{TARGET_COLUMN}' contains fractional value(s). The label is categorical; "
+            "a fraction means the column is not the target this pipeline expects."
+        )
+
+    target = numeric_target.astype(int)
+    unexpected_classes = sorted(set(target.unique()) - set(CLASS_LABELS))
+    if unexpected_classes:
+        raise ValueError(
+            f"'{TARGET_COLUMN}' contains value(s) outside {sorted(CLASS_LABELS)}: "
+            f"{unexpected_classes}. 0 = neither profitable, 1 = group 1, 2 = group 2."
+        )
+
     features = frame.drop(columns=[TARGET_COLUMN])
     allowed = list(BASE_FEATURES)
 
@@ -121,12 +154,33 @@ def split_features_target(
             LEAKAGE_FEATURES,
         )
 
-    available = [column for column in allowed if column in features.columns]
+    # A missing expected feature is a hard failure, not a warning.
+    #
+    # The previous behaviour selected whatever intersection happened to exist, so a file
+    # missing ten columns trained a ten-columns-smaller model that reported its accuracy
+    # without complaint - and the artifact would then fail at serving time, where the API
+    # schema *does* require all 67. Failing here converts a production-time surprise into a
+    # training-time error message naming the columns.
+    missing = [column for column in allowed if column not in features.columns]
+    if missing:
+        raise ValueError(
+            f"Dataset is missing {len(missing)} expected feature column(s): "
+            f"{missing[:10]}{' ...' if len(missing) > 10 else ''}. "
+            "The API schema requires all of them at prediction time, so a model trained "
+            "without them could not be served."
+        )
+
+    # Unexpected columns stay a warning rather than an error. An extra column is ignorable -
+    # it is projected away below and cannot reach the model - whereas a missing one changes
+    # what the model is. Treating both as fatal would refuse a file that is a superset of
+    # the contract, which is a legitimate thing for an upstream system to send.
     extra = [column for column in features.columns if column not in allowed]
     if extra:
-        logger.warning("Ignoring unexpected column(s): %s", extra)
+        logger.warning(
+            "Ignoring %d unexpected column(s) not in the contract: %s", len(extra), extra[:10]
+        )
 
-    return features[available], target
+    return features[allowed], target
 
 
 def build_pipeline(model: Any, add_ratios: bool = True) -> Pipeline:
@@ -183,7 +237,19 @@ def candidate_models(random_state: int = 42, fast: bool = False) -> dict[str, An
             n_estimators=n_estimators,
             min_samples_leaf=2,
             class_weight="balanced_subsample",
-            n_jobs=-1,
+            # n_jobs=1, not -1, and this is a *serving* decision made at training time.
+            #
+            # `n_jobs` is a fitted attribute: it is pickled with the estimator and governs
+            # inference as well as fitting. The champion runs on Cloud Run with **one vCPU**
+            # and request-level concurrency, so `-1` means every concurrent request spawns
+            # workers for cores that do not exist. The result is thread oversubscription and
+            # latency that degrades sharply under exactly the load it was meant to handle -
+            # invisible in single-request benchmarking, which is how it survived.
+            #
+            # The cost is training time on a multi-core laptop. That is paid once, offline,
+            # by someone who can wait. Inference latency is paid on every request by someone
+            # who cannot.
+            n_jobs=1,
             random_state=random_state,
         ),
         "hist_gradient_boosting": HistGradientBoostingClassifier(

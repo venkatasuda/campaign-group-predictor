@@ -349,15 +349,24 @@ estimate of future performance.
 
 ### 5.1 Seven candidates, four families
 
-| Model | CV accuracy |
-|---|---|
-| **Random forest (champion)** | **0.5781 ± 0.0051** |
-| XGBoost | 0.5741 ± 0.0090 |
-| CatBoost | 0.5656 ± 0.0088 |
-| HistGradientBoosting | 0.5649 ± 0.0067 |
-| MLP | 0.5626 ± 0.0183 |
-| LightGBM | 0.5590 ± 0.0124 |
-| Logistic regression | 0.5229 ± 0.0181 |
+| Model | CV accuracy | Class weighting |
+|---|---|---|
+| **Random forest (champion)** | **0.5781 ± 0.0051** | `balanced_subsample` |
+| XGBoost | 0.5741 ± 0.0090 | none |
+| CatBoost | 0.5656 ± 0.0088 | `Balanced` |
+| HistGradientBoosting | 0.5649 ± 0.0067 | none |
+| MLP | 0.5626 ± 0.0183 | none |
+| LightGBM | 0.5590 ± 0.0124 | `balanced` |
+| Logistic regression | 0.5229 ± 0.0181 | `balanced` |
+
+**A confound worth disclosing.** The third column is not uniform: four candidates carry a
+class-weighting policy and three do not, because each was configured with its family's
+conventional default rather than to a single stated policy. **This leaderboard therefore
+compares model families *and* weighting policies at the same time**, and cannot separate
+them. Given that the top five sit within 1.6 points and the champion's margin is inside
+noise, it is not a confound that changes the conclusion — but it is one a reader should not
+have to discover. The correct comparison runs each leading family both with and without the
+same business-motivated weighting.
 
 **The important observation is not who won.** Random forest leads by 0.40 points against a
 combined fold spread of 0.014 — that is not a separation. Three independent lines confirm it:
@@ -478,6 +487,26 @@ endpoint comparison is claimed, and it holds on test.
 **And what is *not* concluded:** that the other 66 features carry no information. They could
 be redundant, individually weak but jointly useful, or useful only under distribution shift.
 The defensible claim is **limited incremental predictive value in this evaluation**.
+
+---
+
+### 5.7 Two questions a stakeholder asks next
+
+**Would more campaigns help? Diminishing returns.** The final doubling of training data bought
+**0.0097** accuracy. The curve has not flattened, but the slope is shallow enough that
+collecting more campaigns is unlikely to be the best available investment. It does not follow
+that more data *cannot* help — only that the return per row is now small, which is consistent
+with everything else in this section pointing at the features rather than the sample size.
+
+**Would combining models help? Unresolved — and reported as such.** Stacking scored above the
+best single base, but with a fold-to-fold standard deviation of **0.0006** across three folds,
+which is implausibly tight, and using reduced model configurations that do not match the
+leaderboard in §5.1. Two of the four bases also carry class weighting while two do not (see
+§5.1), so the comparison confounds ensembling with weighting policy.
+
+Reported as unresolved rather than as a positive result. Maintaining four models to serve one
+prediction needs clearer evidence than a suspiciously small standard deviation on a
+non-comparable configuration.
 
 ---
 

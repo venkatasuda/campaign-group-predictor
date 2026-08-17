@@ -619,6 +619,58 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             y_test.to_numpy(), probabilities, policy
         )
 
+        # What the DEPLOYED SYSTEM actually achieves, as distinct from the classifier.
+        #
+        # Every headline figure in this project - accuracy, per-class recall, lift - describes
+        # the classifier's argmax. But when the decision layer is enabled the API recommends
+        # the minimum-expected-cost action, which differs from argmax on a subset of
+        # campaigns. So the number that is reported and the behaviour that is shipped are not
+        # the same thing, and until now only the first was measured.
+        #
+        # That gap matters in the direction that flatters least: the policy can raise overall
+        # accuracy while *lowering* class-0 recall, because avoiding an expensive mistake and
+        # detecting an unprofitable campaign are different objectives. Reporting only the
+        # classifier hides that trade.
+        #
+        # Recorded unconditionally, whether or not the layer is enabled in a given
+        # deployment, so a reader can always see both numbers and decide which applies.
+        policy_actions = np.array([d.action for d in policy.decide_batch(probabilities)])
+        policy_metrics = classification_metrics(y_test.to_numpy(), policy_actions)
+        policy_lift = estimate_business_lift(y_test.to_numpy(), policy_actions)
+
+        champion_metrics["deployed_policy_performance"] = {
+            "note": (
+                "The cost-sensitive action the API recommends when ENABLE_DECISION_LAYER is "
+                "true. Compare against the classifier metrics above, which describe argmax."
+            ),
+            "accuracy": policy_metrics["accuracy"],
+            "balanced_accuracy": policy_metrics["balanced_accuracy"],
+            "f1_macro": policy_metrics["f1_macro"],
+            "per_class_recall": {
+                label: round(policy_metrics["per_class"][label]["recall"], 4)
+                for label in ("0", "1", "2")
+            },
+            "absolute_lift_pp": policy_lift.absolute_lift_pp,
+            "actions_differing_from_argmax": int(
+                (policy_actions != np.asarray(champion_predictions)).sum()
+            ),
+            "class_0_recall_delta_vs_argmax": round(
+                policy_metrics["per_class"]["0"]["recall"]
+                - champion_metrics["per_class"]["0"]["recall"],
+                4,
+            ),
+        }
+
+        logger.info(
+            "Deployed policy vs classifier: acc %.4f vs %.4f | class-0 recall %.3f vs %.3f "
+            "| %d actions differ",
+            policy_metrics["accuracy"],
+            champion_metrics["accuracy"],
+            policy_metrics["per_class"]["0"]["recall"],
+            champion_metrics["per_class"]["0"]["recall"],
+            champion_metrics["deployed_policy_performance"]["actions_differing_from_argmax"],
+        )
+
     champion_metrics["evaluated_on_test"] = True
     results[best_name].update(champion_metrics)
 
@@ -759,9 +811,36 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             results[best_name]["calibration"] = after.to_dict()
 
     # -- 7b. Explainability --------------------------------------------------------------
+    #
+    # Ranked on the CALIBRATION split when one exists, not on the test set.
+    #
+    # Permutation importance is a *measurement*, so computing it on test looks harmless. It
+    # is not, because the ranking does not stay in the report: section 8.2 of the notebook
+    # selects a feature subset from it, and metrics.json is the machine-readable record that
+    # downstream work reads. A ranking derived from test labels becomes selection on the test
+    # set the moment anything consumes it, and labelling the key "DO_NOT_CITE" is not a
+    # control - a generated artefact will be cited.
+    #
+    # The champion never trained on the calibration split, so a ranking computed there is
+    # honest with respect to the model being ranked. Where no calibration split exists
+    # (`--calibrate` not passed) the fallback is test, and the source is recorded in the
+    # output so a reader can tell which one produced the numbers rather than having to
+    # assume.
     if not args.skip_explain:
+        if x_calib is not None and y_calib is not None:
+            explain_features, explain_target, explain_source = x_calib, y_calib, "calibration"
+        else:
+            explain_features, explain_target, explain_source = x_test, y_test, "test"
+            logger.warning(
+                "No calibration split available, so feature importance is computed on the "
+                "TEST set. Do not use this ranking to select features. Re-run with "
+                "--calibrate for a ranking that is safe to act on."
+            )
+
         try:
-            results[best_name]["explainability"] = explain(explain_pipeline, x_test, y_test)
+            explanation = explain(explain_pipeline, explain_features, explain_target)
+            explanation["computed_on"] = explain_source
+            results[best_name]["explainability"] = explanation
         except Exception as error:  # noqa: BLE001 - never fail training on explainability
             logger.warning("Explainability step failed: %s", error)
 
