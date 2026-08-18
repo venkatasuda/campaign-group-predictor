@@ -40,9 +40,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history, because the tracked-file scan below asks what the repository
-          # contains rather than what this commit changed. Deleting a file in a later commit
-          # does not remove it from earlier ones, and a clone still carries it.
+          # Full history, because one of the scans below walks every commit. Deleting a file
+          # in a later commit does not remove it from earlier ones, and a clone still carries
+          # it - so "is it in the working tree?" and "was it ever committed?" are different
+          # questions with different answers, and only the second one is about disclosure.
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -59,7 +60,7 @@ jobs:
       - name: Blocked paths are not staged
         run: python scripts/check_no_data_committed.py
 
-      - name: No dataset is tracked anywhere in the repository
+      - name: No dataset is tracked in the current tree
         run: |
           tracked=$(git ls-files '*.csv' | grep -v '^reports/' || true)
           if [ -n "$tracked" ]; then
@@ -68,6 +69,29 @@ jobs:
             exit 1
           fi
           echo "No tracked CSV outside reports/."
+
+      # The check above and this one are not duplicates, and the difference is the whole
+      # point. `git ls-files` reads the index: it answers "is the dataset in the tree *now*".
+      # It cannot see a file that was committed and later deleted - and a deleted file is
+      # still in every clone, still in `git log -p`, still recoverable by anyone with the
+      # repository. Deleting is not redacting.
+      #
+      # An earlier version of this job ran only the index check while claiming, in a comment
+      # on the checkout step, to be asking what the repository *contains*. The fetch-depth: 0
+      # was already there; nothing used it. That is the more dangerous shape of a broken
+      # guard - it looks thorough, it passes, and the thing it claims to prevent is untested.
+      - name: No dataset has EVER been committed
+        run: |
+          historical=$(git log --all --full-history --name-only --pretty=format: -- '*.csv' \
+            | sort -u | grep -v '^reports/' | grep -v '^$' || true)
+          if [ -n "$historical" ]; then
+            echo "::error::CSV files exist in git history. Deleting them in a later commit"
+            echo "::error::does NOT remove them from clones. The history must be rewritten,"
+            echo "::error::or the submission must ship as an archive built from the working tree."
+            echo "$historical"
+            exit 1
+          fi
+          echo "No CSV outside reports/ in any commit, on any branch."
 
       - name: Release archive builds without confidential content
         run: |
@@ -178,10 +202,23 @@ jobs:
       - name: Install auditing tools
         run: python -m pip install pip-audit bandit
 
-      # Audits the *serving* requirements rather than the development set, so a finding
-      # concerns something that actually reaches production. A CVE in a linter is noise.
-      - name: pip-audit (serving dependencies)
+      # Runtime dependencies are release-blocking, so this step is --strict: anything shipped
+      # in the container gates the build.
+      #
+      # Development dependencies are audited separately and non-blocking, which is a
+      # difference in *severity and response*, not a claim that they do not matter. A
+      # vulnerable linter still executes with repository access on developer machines and in
+      # this workflow, which is a real supply-chain path. It is treated as non-blocking
+      # because it cannot be reached by an external request against the deployed service, so
+      # it warrants a scheduled fix rather than a stopped release. Calling it "noise" - as an
+      # earlier version of this comment did - would be a claim about risk that the split does
+      # not actually support.
+      - name: pip-audit (serving dependencies, release-blocking)
         run: python -m pip_audit --requirement requirements-serve.txt --strict
+
+      - name: pip-audit (development dependencies, reported not blocking)
+        continue-on-error: true
+        run: python -m pip_audit --requirement requirements.txt
 
       # -ll reports medium and high severity only. Low-severity bandit findings on a
       # codebase like this are almost entirely assert statements in tests.

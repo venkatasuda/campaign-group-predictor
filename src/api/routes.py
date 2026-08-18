@@ -50,6 +50,7 @@ def _to_response(
     result: PredictionResult,
     policy: DecisionPolicy | None,
     automation_threshold: float = 0.0,
+    model_version: str = "unknown",
 ) -> PredictionResponse:
     """Convert a model result into the API response, attaching the decision if enabled.
 
@@ -90,7 +91,7 @@ def _to_response(
 
             decision_payload = DecisionResponse(**decision_dict)
 
-    return PredictionResponse(**payload, decision=decision_payload)
+    return PredictionResponse(**payload, model_version=model_version, decision=decision_payload)
 
 
 @router.get(
@@ -232,7 +233,12 @@ def predict(
         comparison=request.comparison,
     )
     result = predictor.predict(frame)[0]
-    response = _to_response(result, policy, settings.automation_confidence_threshold)
+    response = _to_response(
+        result,
+        policy,
+        settings.automation_confidence_threshold,
+        model_version=str(predictor.metadata.get("model_version", "unknown")),
+    )
 
     logger.info(
         "Prediction served: class=%s confidence=%.4f action=%s",
@@ -263,8 +269,11 @@ def predict_batch(
     )
     results = predictor.predict(frame)
     threshold = settings.automation_confidence_threshold
+    version = str(predictor.metadata.get("model_version", "unknown"))
     logger.info("Batch prediction served: %d comparison(s).", len(results))
     return BatchPredictionResponse(
-        predictions=[_to_response(result, policy, threshold) for result in results],
+        predictions=[
+            _to_response(result, policy, threshold, model_version=version) for result in results
+        ],
         count=len(results),
     )

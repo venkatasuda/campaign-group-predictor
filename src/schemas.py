@@ -230,6 +230,15 @@ class PredictionResponse(BaseModel):
     probabilities: dict[str, float] = Field(
         default_factory=dict, description="Probability per class label."
     )
+    model_version: str = Field(
+        default="unknown",
+        description=(
+            "Version of the artifact that produced this prediction. Present on the "
+            "prediction itself, not only on /model/info: reconciling a logged decision "
+            "months later requires knowing which model made it, and a separate endpoint "
+            "answers only what is loaded *now*."
+        ),
+    )
     decision: DecisionResponse | None = Field(
         default=None,
         description=(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -71,6 +72,26 @@ class TestPredictEndpoint:
         assert 0.0 <= body["confidence"] <= 1.0
         assert body["recommended_action"]
 
+    def test_the_prediction_names_the_model_that_produced_it(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """Every prediction carries its own model version, not just ``/model/info``.
+
+        The two answer different questions. ``/model/info`` reports what is loaded *now*;
+        a stored prediction has to be attributable to the artifact that made it, or an
+        audit months later cannot reconstruct which model produced a decision - and a
+        deployment in between silently invalidates the assumption that they match.
+        """
+        single = client.post("/predict", json=valid_payload).json()
+        assert single["model_version"]
+
+        batch = client.post("/predict/batch", json={"comparisons": [valid_payload]}).json()
+        assert batch["predictions"][0]["model_version"] == single["model_version"]
+
+        # The claim on the prediction and the claim on the endpoint agree for one revision.
+        info = client.get("/model/info").json()["metadata"]
+        assert single["model_version"] == str(info.get("model_version", "unknown"))
+
     def test_uses_the_injected_predictor(
         self, client_with_model: TestClient, valid_payload: dict
     ) -> None:
@@ -101,6 +122,62 @@ class TestPredictEndpoint:
     ) -> None:
         valid_payload["comparison"]["c_1"] = None
         assert client.post("/predict", json=valid_payload).status_code == 200
+
+    def test_nan_is_rejected_even_though_null_is_accepted(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """NaN and null are not the same input, and treating them alike loses information.
+
+        ``null`` is a value the caller does not have, and the pipeline imputes it. ``NaN``
+        is what arrives when a computation upstream went wrong - a division by zero, a
+        failed join - and by the time it reaches the imputer it is indistinguishable from an
+        honest gap. Accepting it would silently convert an upstream defect into a confident
+        prediction.
+        """
+        payload = json.dumps(valid_payload).replace('"c_1": 0.25', '"c_1": NaN', 1)
+        response = client.post(
+            "/predict", content=payload, headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 422
+
+    def test_infinity_is_rejected(self, client: TestClient, valid_payload: dict) -> None:
+        payload = json.dumps(valid_payload).replace('"c_1": 0.25', '"c_1": Infinity', 1)
+        response = client.post(
+            "/predict", content=payload, headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 422
+
+    def test_an_unknown_feature_is_rejected(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """``extra="forbid"``, asserted rather than assumed.
+
+        Silently ignoring an unrecognised key is the failure that looks like success: a
+        caller who misspells ``g1_10`` as ``g1_1O`` would get a prediction built from an
+        imputed value for the field they thought they had supplied.
+        """
+        valid_payload["group_1"]["g1_999"] = 1.0
+        assert client.post("/predict", json=valid_payload).status_code == 422
+
+    def test_too_many_missing_values_is_rejected(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """Imputation has a budget, and past it the prediction describes the imputer.
+
+        A single null is a gap the pipeline fills from training statistics. Fourteen of them
+        means most of the input is the training mean wearing the caller's request as a
+        costume, and the model's confidence would be reporting on data nobody supplied.
+        """
+        for index in range(1, 15):
+            valid_payload["group_1"][f"g1_{index}"] = None
+        assert client.post("/predict", json=valid_payload).status_code == 422
+
+    def test_malformed_json_is_rejected_without_a_traceback(self, client: TestClient) -> None:
+        response = client.post(
+            "/predict", content='{"group_1": ', headers={"Content-Type": "application/json"}
+        )
+        assert response.status_code == 422
+        assert "Traceback" not in response.text
 
 
 class TestLivenessAndReadiness:
@@ -466,6 +543,20 @@ class TestBatchPredictEndpoint:
 
     def test_empty_batch_returns_422(self, client: TestClient) -> None:
         assert client.post("/predict/batch", json={"comparisons": []}).status_code == 422
+
+    def test_an_oversized_batch_is_rejected_before_any_scoring(
+        self, client: TestClient, valid_payload: dict
+    ) -> None:
+        """The 1,000-row ceiling is enforced, and enforced by validation rather than by
+        timeout.
+
+        Without the bound, a caller could submit an arbitrarily large batch and the container
+        would attempt it - a single vCPU running a 400-tree forest per row until Cloud Run
+        kills the request. That failure is indistinguishable from the service being broken.
+        A 422 names the actual problem and costs nothing to produce.
+        """
+        response = client.post("/predict/batch", json={"comparisons": [valid_payload] * 1001})
+        assert response.status_code == 422
 
     def test_invalid_item_in_batch_returns_422(
         self, client: TestClient, valid_payload: dict
