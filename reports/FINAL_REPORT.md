@@ -15,10 +15,11 @@
 | Web interface | `https://campaign-frontend-htvxic2lsq-ey.a.run.app` |
 | Repository | private — `github.com/venkatasuda/campaign-group-predictor` |
 
-*Both services scale to zero. Steady-state latency is **129 ms median, 178 ms p95**
-(`reports/latency.json`). The first request after an idle period is slower — the container
-must start and deserialise a 47 MB model — and has been observed at around 15 seconds on a
-genuinely cold instance, though that is not reproducible on demand. See §7.*
+*Both services scale to zero. Steady-state latency is **79 ms median, 116 ms p95**
+(`reports/latency.json`, 50 requests, 0 failures). The first request after an idle period is
+slower — the container must start and deserialise a 47 MB model — and has been observed at
+around 15 seconds on a genuinely cold instance, though that is not reproducible on demand.
+See §7.*
 
 ---
 ---
@@ -775,7 +776,7 @@ Stated plainly, because each one bounds a claim above.
    group occupies and would degrade sharply and silently if the upstream convention changed.
    This is the monitoring signal I would expect to fire first.
 8. **The cost matrix is assumed, not measured.**
-9. **47 MB artifact and a slow cold start** against a **178 ms** warm p95. Cold start has
+9. **47 MB artifact and a slow cold start** against a **116 ms** warm p95. Cold start has
    been observed at ~15 s but is not reproducible on demand, so it is reported as an
    order-of-magnitude observation rather than a measurement. Three fixes exist; each
    changes the model or the artifact and therefore every reported number.

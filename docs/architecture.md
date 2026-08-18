@@ -326,19 +326,20 @@ developer machine in Germany (`scripts/measure_latency.py`, raw output in
 
 | | ms |
 |---|---|
-| min | 105.0 |
-| median | 129.3 |
-| mean | 134.8 |
-| **p95** | **177.5** |
-| p99 / max | 210.7 |
-| first request, warm container | 1,206.9 |
+| min | 69.8 |
+| median | 79.0 |
+| mean | 84.7 |
+| **p95** | **115.8** |
+| p99 / max | 182.3 |
+| first request, warm container | 935.7 |
 
 Percentiles rather than a mean, because a mean hides the tail and the tail is what times
 out. These include internet round-trip, so service-side latency is lower.
 
-**The cold start is the finding.** Steady-state performance is comfortable — **median 129 ms,
-p95 178 ms** end-to-end, with the model loaded once at container startup rather than per
-request. But a scale-to-zero service pays container start, image pull and deserialisation of a
+**The cold start is the finding.** Steady-state performance is comfortable — **median 79 ms,
+p95 116 ms** end-to-end, with the model loaded once at container startup rather than per
+request. (An earlier revision measured 129/178; the improvement came with the slimmed serving
+image and is recorded here rather than quietly replacing the old figure.) But a scale-to-zero service pays container start, image pull and deserialisation of a
 47 MB artifact on the first request after an idle period.
 
 **How long that takes is *not* something this project has measured repeatably**, and the

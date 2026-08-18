@@ -912,20 +912,20 @@ time.
 
 | | |
 |---|---|
-| Median | **129 ms** |
-| p95 | **178 ms** |
-| p99 | 211 ms |
-| First request of a warm-instance run | 1,207 ms |
+| Median | **79 ms** |
+| p95 | **116 ms** |
+| p99 | 182 ms |
+| First request of a warm-instance run | 936 ms |
 
 **On cold start, and why this figure is reported with a caveat rather than a number.** The
 service scales to zero, so the first request after an idle period pays container start plus
 deserialisation of the **47 MB** artifact. A single earlier observation against a genuinely
 cold container recorded roughly 15 seconds. That measurement is **not reproducible on
 demand** — Cloud Run keeps an instance warm for an unpredictable period, so a run that
-happens to reach a live instance measures something else entirely, as the 1,207 ms figure
+happens to reach a live instance measures something else entirely, as the 936 ms figure
 above shows.
 
-The honest statement is therefore: **steady-state p95 is 178 ms; cold start is of the order
+The honest statement is therefore: **steady-state p95 is 116 ms; cold start is of the order
 of seconds and has been observed once at ~15 s, but the project does not have a repeatable
 measurement of it.** An earlier version of this report quoted 15 s and 91 ms as though both
 were established, while `latency.json` recorded different values — a discrepancy a reviewer

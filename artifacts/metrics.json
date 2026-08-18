@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-18T09:41:06.131740+00:00",
+  "generated_at": "2026-08-18T10:48:08.204744+00:00",
   "dataset": "data/customerGroups.csv",
   "dataset_sha256": "041f3d619b85b5fb8b1c2bf9dde7c1ff1eb8e30df1ad6d4a5d4a168012ed35a1",
   "n_rows": 6620,
@@ -806,102 +806,102 @@
         "shap_importance_top": [
           {
             "feature": "c_2",
-            "mean_abs_shap": 0.048453,
+            "mean_abs_shap": 0.047901,
             "rank": 1
           },
           {
             "feature": "ratio_1",
-            "mean_abs_shap": 0.011962,
+            "mean_abs_shap": 0.012308,
             "rank": 2
           },
           {
-            "feature": "diff_1",
-            "mean_abs_shap": 0.011933,
+            "feature": "c_4",
+            "mean_abs_shap": 0.011896,
             "rank": 3
           },
           {
-            "feature": "c_4",
-            "mean_abs_shap": 0.011579,
+            "feature": "diff_1",
+            "mean_abs_shap": 0.011787,
             "rank": 4
           },
           {
             "feature": "g1_1",
-            "mean_abs_shap": 0.010439,
+            "mean_abs_shap": 0.01043,
             "rank": 5
           },
           {
             "feature": "g2_1",
-            "mean_abs_shap": 0.009787,
+            "mean_abs_shap": 0.010122,
             "rank": 6
           },
           {
             "feature": "c_26",
-            "mean_abs_shap": 0.005284,
+            "mean_abs_shap": 0.005282,
             "rank": 7
           },
           {
             "feature": "c_25",
-            "mean_abs_shap": 0.004377,
+            "mean_abs_shap": 0.004238,
             "rank": 8
           },
           {
-            "feature": "diff_12",
-            "mean_abs_shap": 0.003857,
+            "feature": "c_19",
+            "mean_abs_shap": 0.004038,
             "rank": 9
           },
           {
-            "feature": "c_19",
-            "mean_abs_shap": 0.003847,
+            "feature": "diff_12",
+            "mean_abs_shap": 0.003654,
             "rank": 10
           },
           {
             "feature": "ratio_15",
-            "mean_abs_shap": 0.003105,
+            "mean_abs_shap": 0.003071,
             "rank": 11
           },
           {
             "feature": "g2_17",
-            "mean_abs_shap": 0.003021,
+            "mean_abs_shap": 0.002996,
             "rank": 12
           },
           {
             "feature": "diff_13",
-            "mean_abs_shap": 0.00298,
+            "mean_abs_shap": 0.002878,
             "rank": 13
           },
           {
-            "feature": "c_20",
-            "mean_abs_shap": 0.002706,
+            "feature": "c_9",
+            "mean_abs_shap": 0.002804,
             "rank": 14
           },
           {
-            "feature": "c_9",
-            "mean_abs_shap": 0.002574,
+            "feature": "c_20",
+            "mean_abs_shap": 0.002676,
             "rank": 15
           },
           {
-            "feature": "c_21",
-            "mean_abs_shap": 0.002338,
+            "feature": "g2_13",
+            "mean_abs_shap": 0.002528,
             "rank": 16
           },
           {
-            "feature": "g2_13",
-            "mean_abs_shap": 0.00233,
+            "feature": "c_21",
+            "mean_abs_shap": 0.002292,
             "rank": 17
           },
           {
-            "feature": "diff_14",
-            "mean_abs_shap": 0.002282,
+            "feature": "c_3",
+            "mean_abs_shap": 0.00229,
             "rank": 18
           },
           {
-            "feature": "c_12",
-            "mean_abs_shap": 0.002274,
+            "feature": "diff_15",
+            "mean_abs_shap": 0.002259,
             "rank": 19
           },
           {
-            "feature": "c_3",
-            "mean_abs_shap": 0.002178,
+            "feature": "c_1",
+            "mean_abs_shap": 0.002243,
             "rank": 20
           }
         ],

@@ -430,9 +430,10 @@ be needed.
 2. Probability quality drives the decision layer, so both tree ensembles and a calibration
    step were in scope from the start — even though calibration was ultimately rejected on
    evidence.
-3. A single joblib artifact deploys cleanly to Cloud Run with sub-100 ms CPU inference
-   (measured: **p95 178 ms**, median 129 ms — `reports/latency.json`) and a straightforward
-   permutation-importance explanation story.
+3. A single joblib artifact deploys cleanly to Cloud Run on one vCPU
+   (measured end to end from a developer machine: **p95 116 ms**, median 79 ms —
+   `reports/latency.json`) and carries a straightforward permutation-importance explanation
+   story.
 4. Including a neural baseline and a foundation-model benchmark means the choice is made on
    measured evidence rather than on assumption.
 

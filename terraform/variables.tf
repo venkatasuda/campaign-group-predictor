@@ -134,7 +134,7 @@ variable "api_min_instances" {
     Campaign planning is bursty rather than continuous, so idle cost dominates if this is
     raised.
 
-    Steady state is measured: **p95 178 ms**, median 129 ms over 50 requests against the
+    Steady state is measured: **p95 116 ms**, median 79 ms over 50 requests against the
     deployed service (`reports/latency.json`).
 
     The cold start is **not** measured to the same standard, and the difference is stated

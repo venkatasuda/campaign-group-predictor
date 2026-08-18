@@ -168,7 +168,7 @@ resource "google_cloud_run_v2_service" "api" {
 
     # Request timeout, set explicitly rather than left at Cloud Run's 300-second default.
     #
-    # 300 s is four hundred times the measured p95 of 178 ms. Nothing this service does
+    # 300 s is well over two thousand times the measured p95 of 116 ms. Nothing this service does
     # legitimately takes five minutes: the slowest honest request is a 1,000-row batch, which
     # the schema caps precisely so the work stays bounded. A request still running after 60 s
     # is stuck, not slow - and the default holds an instance hostage to it for another four
