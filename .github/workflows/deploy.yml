@@ -1,8 +1,27 @@
-name: Deploy
+name: Deploy (INCOMPLETE - cannot run end to end without an artifact source)
 
-# Manual by default. Campaign targeting decides budget allocation, so a deploy is a
-# decision someone makes, not a side effect of merging. Uncomment the push trigger once
-# there is a staging environment to absorb the mistake.
+# STATUS, stated at the top because a workflow named "Deploy" implies working CD and this
+# does not yet have it.
+#
+# Every step here is real except one: the artifact fetch. `artifacts/model.pkl` is gitignored,
+# a fresh checkout never contains it, and nothing in this file downloads it - so a dispatch
+# stops at the guard below rather than deploying. Deployment today is manual, from a
+# controlled local environment, because the approved model does not live in Git.
+#
+# That is a deliberate scope decision, not an oversight: putting a 47 MB binary in the
+# repository to make this workflow green would trade a real problem for a worse one. The
+# missing piece is an artifact source - a versioned GCS bucket or a registry - and the fetch
+# step below documents exactly where it plugs in.
+#
+# What this file IS: the deployment procedure, written down and reviewable, with keyless
+# authentication, an explicit confirmation input, and a fail-closed check that refuses to
+# build an image around a missing model. What it is NOT: continuous delivery. The README and
+# the report should describe it that way, and CI - which is complete and does run on every
+# push - should not be conflated with it.
+#
+# Manual by default for a second reason too. Campaign targeting decides budget allocation, so
+# a deploy is a decision someone makes, not a side effect of merging. Uncomment the push
+# trigger once there is both an artifact source and a staging environment to absorb mistakes.
 on:
   workflow_dispatch:
     inputs:

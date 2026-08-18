@@ -245,12 +245,25 @@ resource "google_cloud_run_v2_service" "api" {
         value = local.frontend_url
       }
 
-      # Readiness, not just liveness. Cloud Run must not route traffic to a container that
-      # has started but has not finished deserialising the model - otherwise the first
-      # requests after a scale-up fail for reasons that never reproduce locally.
+      # Three endpoints, three questions, and each probe asks the one it can act on.
+      #
+      # Both probes previously pointed at /health, which answers a fourth question - "what is
+      # the detailed status, for a human?" - and answers it with 200 even when the service is
+      # degraded, because a dashboard needs to read the body. A probe reads only the status
+      # code. So a container serving the 46%-accurate majority-class baseline reported itself
+      # healthy, was given traffic, and nothing in the infrastructure disagreed.
+      #
+      # The endpoints to fix that were built and tested; the infrastructure just never used
+      # them. Implementing the right probe and then not wiring it in leaves the original
+      # failure fully intact while every review of the code says it was handled.
+      #
+      # Startup -> /ready: 503 until the artifact is deserialised AND is not the baseline, so
+      # Cloud Run withholds traffic from a container that has booted but cannot yet serve a
+      # real prediction. failure_threshold x period_seconds = 30s, comfortably above the
+      # observed model load.
       startup_probe {
         http_get {
-          path = "/health"
+          path = "/ready"
           port = 8000
         }
         initial_delay_seconds = 5
@@ -258,9 +271,13 @@ resource "google_cloud_run_v2_service" "api" {
         failure_threshold     = 6
       }
 
+      # Liveness -> /live: process responsiveness only, deliberately checking nothing about
+      # the model. A liveness probe that also checked the artifact would restart a container
+      # whose only problem is a missing model - a crash loop that cannot fix itself, because
+      # the replacement container is missing the same file.
       liveness_probe {
         http_get {
-          path = "/health"
+          path = "/live"
           port = 8000
         }
         period_seconds = 30

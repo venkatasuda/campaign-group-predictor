@@ -60,15 +60,29 @@ jobs:
       - name: Blocked paths are not staged
         run: python scripts/check_no_data_committed.py
 
+      # An exact allow-list, not a directory prefix.
+      #
+      # `grep -v '^reports/'` exempted the whole directory, so `reports/customerGroups.csv`
+      # would have passed - the dataset, committed, under a name the guard was written to
+      # catch. Three files are legitimately CSV here and all three are aggregates: outcome
+      # counts, a decision-sensitivity table and the model leaderboard. Naming them costs one
+      # line per file and removes a directory-shaped hole.
       - name: No dataset is tracked in the current tree
         run: |
-          tracked=$(git ls-files '*.csv' | grep -v '^reports/' || true)
+          allowed="reports/campaign_outcomes.csv reports/decision_sensitivity.csv reports/model_leaderboard.csv"
+          tracked=""
+          for file in $(git ls-files '*.csv'); do
+            case " $allowed " in
+              *" $file "*) ;;
+              *) tracked="$tracked$file"$'\n' ;;
+            esac
+          done
           if [ -n "$tracked" ]; then
-            echo "::error::Confidential or unexpected CSV files are tracked:"
+            echo "::error::CSV files outside the allow-list are tracked:"
             echo "$tracked"
             exit 1
           fi
-          echo "No tracked CSV outside reports/."
+          echo "Only the three permitted aggregate CSVs are tracked."
 
       # The check above and this one are not duplicates, and the difference is the whole
       # point. `git ls-files` reads the index: it answers "is the dataset in the tree *now*".
@@ -82,8 +96,15 @@ jobs:
       # guard - it looks thorough, it passes, and the thing it claims to prevent is untested.
       - name: No dataset has EVER been committed
         run: |
-          historical=$(git log --all --full-history --name-only --pretty=format: -- '*.csv' \
-            | sort -u | grep -v '^reports/' | grep -v '^$' || true)
+          allowed="reports/campaign_outcomes.csv reports/decision_sensitivity.csv reports/model_leaderboard.csv"
+          historical=""
+          for file in $(git log --all --full-history --name-only --pretty=format: -- '*.csv' | sort -u); do
+            [ -n "$file" ] || continue
+            case " $allowed " in
+              *" $file "*) ;;
+              *) historical="$historical$file"$'\n' ;;
+            esac
+          done
           if [ -n "$historical" ]; then
             echo "::error::CSV files exist in git history. Deleting them in a later commit"
             echo "::error::does NOT remove them from clones. The history must be rewritten,"

@@ -542,6 +542,27 @@ class TestBatchPredictEndpoint:
     def test_empty_batch_returns_422(self, client: TestClient) -> None:
         assert client.post("/predict/batch", json={"comparisons": []}).status_code == 422
 
+    def test_an_oversized_body_is_rejected_by_content_length(self, client: TestClient) -> None:
+        """413 from the body-size middleware, before the payload is parsed.
+
+        Two ceilings exist and they stop different things. The 1,000-row schema limit is
+        semantic and applies after parsing; this one is a byte count read from the header,
+        which is what prevents an 80 MB body being deserialised into memory at all. Only the
+        second protects a 1-vCPU container against a caller who never sends valid JSON.
+
+        `Content-Length` can be absent or wrong on a chunked request, so this is a cheap
+        first filter rather than a complete guard - the real ceiling belongs at the load
+        balancer. Cheap and partial is still the difference between a rejected request and
+        an evicted container.
+        """
+        response = client.post(
+            "/predict",
+            content=b"{}",
+            headers={"Content-Type": "application/json", "Content-Length": str(9 * 1024 * 1024)},
+        )
+        assert response.status_code == 413
+        assert "exceeds" in response.json()["detail"]
+
     def test_an_oversized_batch_is_rejected_before_any_scoring(
         self, client: TestClient, valid_payload: dict
     ) -> None:

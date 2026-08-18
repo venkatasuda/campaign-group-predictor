@@ -297,7 +297,7 @@ campaign-group-predictor/
 │       ├── diagnostics.py    # learning curve, operating points, ablation, ensembling
 │       └── train.py          # training CLI
 ├── frontend/app.py           # Streamlit UI - a thin client, no business logic
-├── tests/                    # 402 tests across 17 modules
+├── tests/                    # 427 tests across 17 modules
 ├── docs/                     # architecture.md, validation_plan.md, model_card.md, WALKTHROUGH.md
 ├── notebooks/
 │   ├── 01_analysis.ipynb     # the analysis narrative, reproducible end to end
@@ -642,7 +642,7 @@ pytest tests/test_api.py -v --no-cov    # one module (--no-cov: 30 tests cannot 
 pytest --cov=src --cov-report=html && open htmlcov/index.html
 ```
 
-**402 tests across 17 modules, 92.4% branch coverage** against `fail_under = 90` in
+**427 tests across 17 modules, 91.43% branch coverage** against `fail_under = 90` in
 `pyproject.toml` — so the gate behaves identically on a laptop and in CI.
 
 Covered: feature engineering arithmetic, leakage removal, payload validation and every

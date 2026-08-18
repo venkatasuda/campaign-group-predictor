@@ -867,6 +867,23 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
             if key not in {"explainability", "per_class"}
         },
         "dataset_sha256": dataset_fingerprint(args.data),
+        # The seed that decided WHICH campaigns were held out, carried in the artifact rather
+        # than only in metrics.json.
+        #
+        # `SklearnPipelinePredictor` declares `holdout_seed` and /model/info reports it, but
+        # nothing wrote it here - so the deployed service answered `"holdout_seed": null`
+        # while metrics.json recorded 20260819. The field looked implemented from the serving
+        # side and was empty in practice.
+        #
+        # It matters because the two artifacts this project can produce differ ONLY by this
+        # number: seed 20260819 gives 0.5483 accuracy, seed 42 gives 0.5755, and the pickles
+        # are otherwise indistinguishable. Without the seed in the artifact, a running service
+        # cannot say which of them it is serving - which is exactly the confusion that shipped
+        # a seed-42 model against documents quoting seed-20260819 figures.
+        # The RESOLVED seed (line ~331), not args.holdout_seed: when the flag is omitted it
+        # falls back to random_state, and recording None here would reintroduce the same
+        # "which run is this?" gap through a different door.
+        "holdout_seed": holdout_seed,
         # Recorded so the serving side can detect a mismatch. A pipeline pickled by one
         # scikit-learn minor version and unpickled by another may load without error and
         # then behave differently - the failure is silent, which is what makes it worth

@@ -55,7 +55,7 @@ defensible signal rather than a defect — but it means the model has partly lea
 slot* a group occupies, and would degrade sharply if that convention changed upstream.
 
 The system is deployed: a FastAPI service on Cloud Run with a cost-sensitive decision
-layer, a web interface, 390 tests across 17 modules at 92.4% branch coverage behind an
+layer, a web interface, 427 tests across 17 modules at 91.43% branch coverage behind an
 enforced floor, CI on GitHub Actions, and Terraform.
 
 **Live API:** <https://campaign-api-395867964283.europe-west3.run.app>
@@ -882,7 +882,7 @@ between campaigns. GKE would add operational overhead with no benefit at this sc
 | Application factory | `create_app()` for isolated test instances |
 | Config | Environment-driven (12-factor) |
 | Errors | Domain exception hierarchy mapped to HTTP codes |
-| Tests | 390 tests across 17 modules, **92.4% branch coverage** against a `fail_under = 90` floor in `pyproject.toml`, so the gate behaves identically on a laptop and in CI. `train.py` is included in the measurement and is the weakest module at 72% — the untested paths are the calibration branch and MLflow logging, both of which need a full training run rather than the `--fast` smoke runs the suite uses |
+| Tests | 427 tests across 17 modules, **91.43% branch coverage** against a `fail_under = 90` floor in `pyproject.toml`, so the gate behaves identically on a laptop and in CI. `train.py` is included in the measurement and is the weakest module at 72% — the untested paths are the calibration branch and MLflow logging, both of which need a full training run rather than the `--fast` smoke runs the suite uses |
 | CI | GitHub Actions (`.github/workflows/ci.yml`) — confidential-data guard, ruff, black, mypy, pytest with the coverage floor, pip-audit, bandit, image build, container smoke test. **Training is deliberately not in CI**: the dataset is never committed, so there is nothing to train on — which is also why the suite runs on synthetic fixtures |
 | Container | Slim base, layer caching, non-root user, health check |
 

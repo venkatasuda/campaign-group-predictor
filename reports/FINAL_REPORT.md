@@ -661,7 +661,7 @@ authentication stops an authorised caller submitting an empty payload.
 
 ### 7.4 Testing
 
-**402 tests across 17 modules, 92.4% branch coverage** against an enforced `fail_under = 90`
+**427 tests across 17 modules, 91.43% branch coverage** against an enforced `fail_under = 90`
 in `pyproject.toml`, so the gate behaves identically locally and in CI.
 
 Three tests assert *properties* rather than return values:
@@ -684,15 +684,30 @@ the fixtures are what make the code verifiable by a machine not permitted to see
 
 ### 7.5 CI/CD and infrastructure
 
-`.github/workflows/ci.yml`, five jobs: **data-guard** (asserts the dataset is absent from the
-tree *and* from git history — runs first and alone), **lint** (ruff, black, mypy), **test**
-(coverage floor, optional libraries installed so guarded paths are exercised), **security**
-(pip-audit against the *serving* requirements, bandit), **docker** (build → start → wait for
-`/health` → drive real predictions).
+`.github/workflows/ci.yml`, seven jobs: **data-guard** (asserts no dataset in the tree *and*
+none in git history, against an exact three-file allow-list rather than a directory exemption
+— runs first and alone), **lint** (ruff, black, mypy), **test** (coverage floor, optional
+libraries installed so guarded paths are exercised), **terraform** (fmt, init without a
+backend, validate), **security** (pip-audit against the *serving* requirements as
+release-blocking, plus a non-blocking development audit, and bandit), **docker** (builds and
+boots the degraded application), and **docker-with-model** (builds a synthetic artifact,
+bakes it in, and asserts `/ready` reaches 200, `/model/info` is not the baseline, a real
+prediction returns a conformant body, and the container is not running as root).
 
-Deployment is a separate manual workflow using Workload Identity Federation for keyless auth.
-Campaign targeting allocates budget — a deploy is a decision someone makes, not a side effect
-of merging.
+**CI is complete. CD is not, and the distinction is stated rather than blurred.**
+`deploy.yml` holds the deployment procedure — keyless Workload Identity Federation, an
+explicit confirmation input, a fail-closed check that refuses to build an image around a
+missing model — but it cannot run end to end. `artifacts/model.pkl` is gitignored, a fresh
+checkout never contains it, and nothing in the workflow downloads it, so a dispatch stops at
+that guard. Deployment today is manual, from a controlled local environment, because the
+approved model does not live in Git.
+
+That is a scope decision, not an omission: committing a 47 MB binary to make the workflow
+green would trade a real problem for a worse one. The missing piece is an artifact source —
+a versioned GCS bucket or a registry — and the fetch step marks exactly where it plugs in.
+
+Manual also for a second reason. Campaign targeting allocates budget, so a deploy is a
+decision someone makes, not a side effect of merging.
 
 Terraform provisions both services, IAM and Artifact Registry, with least-privilege service
 accounts. The 0.60 confidence gate is **declared in Terraform**, not passed on a command line,

@@ -91,7 +91,7 @@ This is also why calibration matters: those probabilities get multiplied by mone
 
 ### 6. Deployed it
 
-FastAPI on Cloud Run, a Streamlit interface, 390 tests across 17 modules at 92.4% behind a
+FastAPI on Cloud Run, a Streamlit interface, 427 tests across 17 modules at 91.43% behind a
 enforced branch-coverage floor, containerised, CI, Terraform, MLflow tracking, drift-reference
 statistics stored in the model artifact, and the dataset's SHA-256 recorded for lineage.
 
