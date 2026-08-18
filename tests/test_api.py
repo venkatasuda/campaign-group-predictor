@@ -147,9 +147,7 @@ class TestPredictEndpoint:
         )
         assert response.status_code == 422
 
-    def test_an_unknown_feature_is_rejected(
-        self, client: TestClient, valid_payload: dict
-    ) -> None:
+    def test_an_unknown_feature_is_rejected(self, client: TestClient, valid_payload: dict) -> None:
         """``extra="forbid"``, asserted rather than assumed.
 
         Silently ignoring an unrecognised key is the failure that looks like success: a
