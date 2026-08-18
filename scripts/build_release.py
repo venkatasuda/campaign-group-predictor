@@ -155,7 +155,7 @@ def collect() -> list[Path]:
     return sorted(set(selected), key=lambda p: p.as_posix())
 
 
-def guard(paths: list[Path]) -> list[str]:
+def guard(paths: list[Path], dry_run: bool = False) -> list[str]:
     """Return a list of reasons the archive must not be written."""
     problems: list[str] = []
 
@@ -174,10 +174,28 @@ def guard(paths: list[Path]) -> list[str]:
     # Positive assertions. Their absence is what made the last archive look dishonest: the
     # documentation described CI, and the workflow file had been dropped by the packaging
     # step rather than being missing from the project.
-    required = ["src/api/main.py", "README.md", "artifacts/model.pkl"]
+    required = ["src/api/main.py", "README.md"]
     for name in required:
         if Path(name) not in paths:
             problems.append(f"MISSING required file: {name}")
+
+    # The artifact is required to *ship* and impossible to have in CI.
+    #
+    # A real build must contain model.pkl - an archive that documents a champion and omits it
+    # is the dishonest case this function exists to prevent. But `artifacts/*.pkl` is
+    # gitignored, so a CI runner never has one, and demanding it there fails the data guard
+    # for the one reason that has nothing to do with data.
+    #
+    # The two modes ask different questions. A real build asks "is this archive complete and
+    # clean?"; --dry-run in CI asks "would this archive leak confidential content?" - a
+    # question the model's absence cannot answer either way. Conflating them produced a guard
+    # that could only pass on the maintainer's laptop, which is the same class of defect as a
+    # test that only passes locally.
+    if not dry_run and Path("artifacts/model.pkl") not in paths:
+        problems.append(
+            "MISSING required file: artifacts/model.pkl - a release archive that documents a "
+            "champion model must contain it. Run the training command in the README first."
+        )
 
     if not any(p.as_posix().startswith(".github/workflows/") for p in paths):
         problems.append(
@@ -196,7 +214,7 @@ def main() -> int:
     args = parser.parse_args()
 
     paths = collect()
-    problems = guard(paths)
+    problems = guard(paths, dry_run=args.dry_run)
 
     total_bytes = sum((PROJECT_ROOT / p).stat().st_size for p in paths)
     print(f"{len(paths)} files, {total_bytes / 1_048_576:.1f} MiB uncompressed\n")
