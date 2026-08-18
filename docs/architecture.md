@@ -8,7 +8,22 @@ be exported as PNG/SVG at <https://mermaid.live> for the slide deck.
 
 ---
 
-## 1. High-level technical architecture
+## 1. Architecture
+
+Two diagrams, deliberately separated.
+
+A single diagram covering both what runs and what is planned is the most common way an
+architecture document misleads, and it does so while looking thorough. A reader cannot tell
+which boxes they could go and curl. An earlier version of this page had exactly that problem:
+one diagram showed Cloud Storage loading the model at startup, BigQuery receiving a prediction
+log, and drift alerts triggering retraining. None of those exist. All three are named as
+unbuilt in the final report's limitations, so the document contradicted itself - and the
+diagram, being the part people actually look at, was the copy that lied.
+
+### 1.1 Implemented today
+
+Everything below is deployed and can be verified: the endpoints answer, the image exists in
+Artifact Registry, the logs are queryable.
 
 ```mermaid
 flowchart TB
@@ -17,87 +32,107 @@ flowchart TB
         DS["Data Scientist"]
     end
 
-    subgraph Marketing["Technical Marketing Platform"]
-        CMP["Campaign Management System<br/>candidate group pairs"]
-        EXEC["Campaign Execution<br/>email / push / on-site"]
-    end
-
     subgraph Frontend["Presentation Layer"]
         UI["Streamlit Web App<br/>(Cloud Run)"]
     end
 
-    subgraph Backend["Serving Layer"]
-        LB["HTTPS Load Balancer"]
-        API["FastAPI Prediction Service<br/>(Cloud Run, autoscaled)"]
+    subgraph Backend["Serving Layer - Cloud Run"]
+        API["FastAPI Prediction Service<br/>1 vCPU, scale-to-zero"]
         subgraph Internals["Service internals"]
-            SCH["Pydantic Schemas<br/>request validation"]
+            SCH["Pydantic Schemas<br/>67-feature validation"]
             ADP["FeatureTransformer<br/>(Adapter)"]
             REG["ModelRegistry<br/>(Singleton)"]
             PRD["Predictor<br/>(Strategy)"]
         end
+        MDL["model.pkl<br/>BAKED INTO THE IMAGE"]
     end
 
-    subgraph Storage["Model & Data Layer"]
-        GCS["Cloud Storage<br/>model.pkl + metrics.json"]
-        BQ["BigQuery<br/>campaign history + prediction log"]
-    end
-
-    subgraph Training["Training Layer (offline)"]
+    subgraph Training["Training Layer - offline, on a developer machine"]
         NB["EDA Notebook"]
         TRN["Training Job<br/>src.training.train"]
-        EVAL["Evaluation<br/>metrics + business lift"]
+        EVAL["Evaluation<br/>metrics.json + findings.json"]
     end
 
     subgraph Ops["CI/CD & Observability"]
-        GH["GitHub Actions<br/>ruff, black, pytest, docker build"]
+        GH["GitHub Actions<br/>guards, lint, tests, terraform,<br/>security, container smoke tests"]
         AR["Artifact Registry"]
-        MON["Cloud Logging + Monitoring<br/>latency, errors, drift"]
+        LOG["Cloud Logging<br/>structured JSON, request_id"]
     end
 
     CM --> UI
-    CM --> CMP
     DS --> NB
 
-    UI -->|HTTPS JSON| LB
-    CMP -->|POST /predict/batch| LB
-    LB --> API
+    UI -->|HTTPS JSON| API
     API --> SCH --> ADP --> REG --> PRD
+    PRD --> MDL
 
-    API -->|action + confidence| CMP
-    CMP -->|targets the recommended group| EXEC
-    EXEC -->|realised ROI per group| BQ
-
-    BQ --> NB
-    BQ --> TRN
     NB --> TRN
     TRN --> EVAL
-    TRN -->|upload artifact| GCS
-    GCS -->|load at startup| REG
+    TRN -->|writes artifacts/model.pkl| MDL
 
-    API -->|structured logs| MON
-    API -->|prediction log| BQ
-    MON -->|drift alert| TRN
-
+    API -->|structured logs| LOG
     GH --> AR --> API
     GH --> UI
 
-    classDef store fill:#eef5ff,stroke:#4a7dbd
     classDef svc fill:#eefaf0,stroke:#3f9d59
-    classDef mktg fill:#fff4e6,stroke:#d98b32
-    class GCS,BQ store
+    classDef baked fill:#fff4e6,stroke:#d98b32
     class API,UI svc
-    class CMP,EXEC mktg
+    class MDL baked
 ```
 
-The loop closes: the campaign management system asks the API which group to target, the
-execution layer runs the campaign, the realised ROI of **both** groups lands back in
-BigQuery, and that becomes the next training row. This is the integration point the brief
-asks about - the model is a component of the marketing platform, not a standalone demo.
+Note what is absent, because each absence is a deliberate scope decision rather than an
+oversight: no model registry, no feature store, no database, no message queue, no separate
+load balancer. The artifact ships inside the image, which is why a new model requires a new
+revision - and why rollback is a revision rollback rather than a config change.
 
-### What is built today vs. what the diagram proposes
+### 1.2 Target architecture - PROPOSED, none of this is built
 
-The diagram above is the **target architecture**. Not all of it is deployed, and it would
-be misleading to present it as if it were. The boundary is explicit:
+Nothing in this diagram exists. It is the shape the system would take once retraining is
+routine rather than occasional, and it is included to show the seams were considered, not to
+imply they were implemented.
+
+```mermaid
+flowchart TB
+    subgraph Proposed["Proposed - not implemented"]
+        GCS["Cloud Storage<br/>versioned model artifacts"]
+        BQ["BigQuery<br/>campaign history + prediction log"]
+        FB["Feedback store<br/>realised ROI per campaign"]
+        DRIFT["Drift monitoring<br/>PSI computed on live traffic"]
+        SCHED["Scheduled retraining<br/>Cloud Scheduler + job"]
+        APPR["Approval & promotion<br/>human gate before rollout"]
+        REGY["Model registry<br/>stage promotion"]
+    end
+
+    API2["FastAPI service<br/>(implemented today)"]
+
+    API2 -.->|prediction log| BQ
+    FB -.-> BQ
+    BQ -.-> DRIFT
+    DRIFT -.->|breach| SCHED
+    SCHED -.-> GCS
+    GCS -.-> REGY
+    REGY -.-> APPR
+    APPR -.->|promote| API2
+
+    classDef proposed fill:#f5f5f5,stroke:#999,stroke-dasharray: 5 3
+    class GCS,BQ,FB,DRIFT,SCHED,APPR,REGY proposed
+```
+
+The single dependency worth noting: every box here needs the feedback store first. Without
+realised ROI per campaign there is nothing to retrain *on*, nothing to compute drift
+*against*, and no basis for an approval decision. That is why the final report's next steps
+put obtaining a campaign identifier above any modelling work.
+
+Once that store exists the loop closes: the campaign management system asks the API which
+group to target, the execution layer runs the campaign, the realised ROI of **both** groups
+lands back in BigQuery, and that becomes the next training row. That is the integration point
+the brief asks about - the model as a component of the marketing platform rather than a
+standalone demo. Today the loop is open, and the open end is the feedback store.
+
+### What is built today vs. what §1.2 proposes
+
+Restating the split as a table, because a reader checking one specific capability should not
+have to infer it from which of two diagrams a box appeared in:
 
 | Component | Status | Note |
 |---|---|---|
@@ -180,11 +215,12 @@ sequenceDiagram
     participant REG as ModelRegistry
     participant MDL as Predictor (Pipeline)
     participant DEC as Decision Layer
-    participant LOG as Cloud Logging / BigQuery
+    participant LOG as Cloud Logging
 
     Note over REG,MDL: Container startup (once)
-    REG->>MDL: load model.pkl from Cloud Storage
+    REG->>MDL: load /app/artifacts/model.pkl (baked into the image)
     MDL-->>REG: fitted pipeline + metadata
+    Note over REG,MDL: Startup canary scores one synthetic campaign;<br/>on failure the container never becomes ready
 
     CM->>CMP: Plan campaign, pick two candidate groups
     CMP->>API: POST /predict {group_1, group_2, comparison}
@@ -205,12 +241,14 @@ sequenceDiagram
         Note right of MDL: impute -> scale -> model
         MDL-->>API: class + class probabilities
 
-        API->>DEC: decide(probabilities, cost matrix)
-        Note right of DEC: minimise expected cost,<br/>not argmax
-        DEC-->>API: action + expected costs + review flag
+        opt ENABLE_DECISION_LAYER=true (OFF by default)
+            API->>DEC: decide(probabilities, cost matrix)
+            Note right of DEC: minimise expected cost, not argmax.<br/>Off by default: the cost matrix is assumed,<br/>not supplied by the business
+            DEC-->>API: action + expected costs + review flag
+        end
 
-        API->>LOG: log(class, action, confidence, latency)
-        API-->>CMP: 200 {predicted_class, probabilities,<br/>decision{action, rationale, review_required}}
+        API->>LOG: log(class, action, confidence, latency, request_id)
+        API-->>CMP: 200 {predicted_class, label, description,<br/>confidence, probabilities, model_version,<br/>decision (only when enabled)}
 
         alt Confidence below the automation gate, or costs nearly tied
             CMP-->>CM: Escalate to a human

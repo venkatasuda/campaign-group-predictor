@@ -368,21 +368,14 @@ together with the champion flip observed between two search strategies, the conc
 consistent: **these models are not separable on this data.**
 
 **On model choice.** The strongest models on public tabular benchmarks in 2026 are tabular
-foundation models: TabPFN-3 leads TabArena at 1673 Elo against 1375 for tuned, ensembled
-XGBoost. They were *not* deployed here for a licensing reason rather than a technical one —
-the licence permits evaluation and internal benchmarking but prohibits using model outputs
-to support business decisions, which is exactly what campaign targeting is. Given seven
-conventional families converged within a few points, a foundation model is unlikely to move
-the result materially, but it is the cheapest remaining experiment. Full reasoning in
-`docs/model_card.md` (ADR-001).
-
-**On model choice.** The strongest models on public tabular benchmarks in 2026 are tabular
 foundation models: TabPFN-3 leads TabArena at 1673 Elo against 1433 for the best tuned
 tree. They were *not* deployed here, for a licensing reason rather than a technical one —
 the TabPFN-3.0 licence permits evaluation and internal benchmarking but prohibits using
 model outputs for internal commercial decision-making, which is exactly what campaign
-targeting is. The full reasoning, including the options rejected, is in `docs/model_card.md`
-(ADR-001).
+targeting is. Given that seven conventional families converged within a few points, a
+foundation model is unlikely to move the result materially, but it remains the cheapest
+remaining experiment. The full reasoning, including the options rejected, is in
+`docs/model_card.md` (ADR-001).
 
 ### 4.4 Calibration
 

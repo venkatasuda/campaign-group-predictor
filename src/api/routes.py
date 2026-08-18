@@ -240,11 +240,30 @@ def predict(
         model_version=str(predictor.metadata.get("model_version", "unknown")),
     )
 
+    # `extra` rather than interpolation only, for the same reason the access log uses it:
+    # on Cloud Run these become top-level fields, so "what did the model predict for the
+    # campaigns we ran in March, and how confident was it?" is a log query rather than a
+    # text search. Interpolated values are readable but not aggregatable, and the questions
+    # asked of this service six weeks later are aggregate questions.
+    #
+    # The feature payload is deliberately NOT logged. It describes real customer segments,
+    # and nothing here needs it: the prediction, the confidence and the request ID are enough
+    # to explain a decision, while 67 columns per request would be a retention liability
+    # nobody has agreed to hold.
     logger.info(
         "Prediction served: class=%s confidence=%.4f action=%s",
         result.predicted_class,
         result.confidence,
         response.decision.action_label if response.decision else "n/a",
+        extra={
+            "predicted_class": result.predicted_class,
+            "predicted_label": response.label,
+            "confidence": round(float(result.confidence), 4),
+            "model_version": response.model_version,
+            "decision_action": response.decision.action_label if response.decision else None,
+            "review_required": response.decision.review_required if response.decision else None,
+            "batch_size": 1,
+        },
     )
     return response
 
@@ -270,7 +289,22 @@ def predict_batch(
     results = predictor.predict(frame)
     threshold = settings.automation_confidence_threshold
     version = str(predictor.metadata.get("model_version", "unknown"))
-    logger.info("Batch prediction served: %d comparison(s).", len(results))
+
+    # Batch size as a field, not only in the message: it is the input that determines cost
+    # per request, so it is what a latency percentile has to be read against. A slow batch of
+    # 900 and a slow batch of 2 are different incidents.
+    logger.info(
+        "Batch prediction served: %d comparison(s).",
+        len(results),
+        extra={
+            "batch_size": len(results),
+            "model_version": version,
+            "class_counts": {
+                str(class_value): sum(1 for r in results if r.predicted_class == class_value)
+                for class_value in sorted({r.predicted_class for r in results})
+            },
+        },
+    )
     return BatchPredictionResponse(
         predictions=[
             _to_response(result, policy, threshold, model_version=version) for result in results

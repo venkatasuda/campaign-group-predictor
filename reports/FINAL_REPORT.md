@@ -767,7 +767,20 @@ Stated plainly, because each one bounds a claim above.
 10. **No model registry** — the artifact is baked into the image. The seam exists; versioned
     retrieval from Cloud Storage is designed, not built.
 11. **No authentication or rate limiting**, deliberately, so the service can be evaluated by
-    opening a URL. Production removes `--allow-unauthenticated` and limits at Cloud Armor.
+    opening a URL. `allow_unauthenticated = true` is a Terraform variable, not a hardcoded
+    choice, and flipping it removes the `allUsers` invoker binding.
+
+    Flipping it is **not sufficient on its own**, and saying only "production removes
+    `--allow-unauthenticated`" would understate the work. The Terraform half is already
+    there - the frontend has its own service account and holds `roles/run.invoker` on the API,
+    which is the least-privilege binding a private deployment needs. The application half is
+    not: `frontend/app.py` calls the API with a plain `requests.post` and no `Authorization`
+    header, so making the API private today would break the frontend with 403s rather than
+    secure it.
+
+    The missing piece is small and specific - fetch a Google-signed ID token for the API's
+    audience from the metadata server and attach it as a bearer token, refreshing on
+    expiry - but it is missing, and a plan that omits it is a plan that fails on execution.
 12. **Drift reference captured; nothing computes PSI at runtime.**
 
 ## 9. Next steps

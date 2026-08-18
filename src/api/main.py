@@ -13,6 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -42,6 +43,50 @@ def _register_exception_handlers(app: FastAPI) -> None:
     async def _invalid_payload(_: Request, exc: InvalidFeaturePayloadError) -> JSONResponse:
         logger.warning("Invalid payload: %s", exc)
         return _envelope(exc, status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+    # Request validation, handled explicitly because FastAPI's default cannot serialise the
+    # one input this schema most needs to reject.
+    #
+    # `schemas.py` refuses NaN and infinity - they are indistinguishable from a missing value
+    # downstream and usually mean an upstream computation failed. But the default handler
+    # builds a 422 body that echoes the offending value, and Starlette encodes responses with
+    # `allow_nan=False`. Encoding `nan` therefore raises inside the error handler, the
+    # catch-all converts that to a **500**, and the API answers a malformed request with
+    # "internal server error" - blaming itself for the caller's payload, and returning the
+    # wrong status code for a documented rejection.
+    #
+    # The validator was correct and untested; the bug lived in the path that reports it.
+    #
+    # This handler also stops echoing caller input altogether. The field path and the reason
+    # are what a caller needs to fix the request; replaying their own payload back to them
+    # adds nothing and widens what an unauthenticated probe can extract.
+    @app.exception_handler(RequestValidationError)
+    async def _request_validation(_: Request, exc: RequestValidationError) -> JSONResponse:
+        problems = []
+        categories: list[str] = []
+        for error in exc.errors():
+            location = ".".join(str(part) for part in error.get("loc", ()) if part != "body")
+            problems.append(f"{location or 'body'}: {error.get('msg', 'invalid')}")
+            categories.append(str(error.get("type", "unknown")))
+
+        detail = "; ".join(problems) or "Request failed validation."
+
+        # The failure *category* is a field, because the useful question about 422s is which
+        # kind is spiking. A rise in `missing` means a caller changed their payload; a rise in
+        # `value_error` from the NaN guard means something upstream is computing badly. Both
+        # look identical in a count of 422s, and they need different people.
+        logger.warning(
+            "Request validation failed: %s",
+            detail,
+            extra={
+                "validation_failure_categories": sorted(set(categories)),
+                "validation_error_count": len(problems),
+            },
+        )
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=ErrorResponse(error="RequestValidationError", detail=detail).model_dump(),
+        )
 
     @app.exception_handler(ModelNotLoadedError)
     async def _model_not_loaded(_: Request, exc: ModelNotLoadedError) -> JSONResponse:

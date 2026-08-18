@@ -285,3 +285,130 @@ jobs:
       - name: Stop
         if: always()
         run: docker rm -f api || true
+
+  # --------------------------------------------------------------- the real serving path
+  # The job above proves the DEGRADED application boots. This one proves the production path
+  # works: an artifact loads, the startup canary passes, /ready turns 200, and a real
+  # scikit-learn pipeline answers a prediction with a schema-conformant body.
+  #
+  # Those are different failures. A missing entry in requirements-serve.txt, a pickle needing
+  # a library the serving image does not install, a preprocessing step that breaks outside the
+  # training environment - each passes the baseline smoke test and fails on the first real
+  # request. Until now that path was verified by hand against the deployed revision, which is
+  # to say: not on every commit.
+  #
+  # The artifact is synthetic and deliberately worthless. CI cannot have the champion - it is
+  # gitignored and built from confidential data - so this trains a tiny random forest on
+  # noise. It shares the contract, not the numbers.
+  docker-with-model:
+    name: Container serves a real prediction
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -e .
+
+      # --force because the runner's checkout has no artifact; the flag exists to stop a
+      # developer overwriting the champion by running this locally out of habit.
+      - name: Build a synthetic artifact
+        run: python scripts/make_test_artifact.py --out artifacts/model.pkl --force
+
+      - uses: docker/setup-buildx-action@v3
+
+      # No .dockerignore exclusion for artifacts/, so the freshly written pkl is baked in -
+      # the same COPY the released image uses.
+      - name: Build the image with the artifact inside
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: campaign-api:with-model
+          cache-from: type=gha
+
+      # No ALLOW_BASELINE_FALLBACK. If the artifact fails to load, the canary raises, the
+      # container never becomes ready, and this job fails - which is the behaviour Cloud Run
+      # relies on to keep the previous revision serving.
+      - name: Start
+        run: docker run -d --name api-model -p 8000:8000 campaign-api:with-model
+
+      - name: Readiness must reach 200
+        run: |
+          for attempt in $(seq 1 45); do
+            code=$(curl -s -o /tmp/ready.json -w "%{http_code}" http://localhost:8000/ready || true)
+            if [ "$code" = "200" ]; then
+              echo "Ready after ${attempt}s:"; cat /tmp/ready.json; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::/ready never returned 200 - the model did not load."
+          cat /tmp/ready.json 2>/dev/null || true
+          docker logs api-model
+          exit 1
+
+      - name: /model/info reports a loaded model
+        run: |
+          curl -fsS http://localhost:8000/model/info > /tmp/info.json
+          cat /tmp/info.json
+          python - <<'PY'
+          import json, sys
+          info = json.load(open("/tmp/info.json"))["metadata"]
+          if info.get("is_baseline"):
+              sys.exit("::error::Serving the baseline, not the artifact.")
+          print("Model:", info.get("model_name"), info.get("model_version"))
+          PY
+
+      - name: A real prediction, with a conformant response
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          from src.constants import COMPARISON_FEATURES, GROUP_1_FEATURES, GROUP_2_FEATURES
+
+          payload = {
+              "group_1": dict.fromkeys(GROUP_1_FEATURES, 1.0),
+              "group_2": dict.fromkeys(GROUP_2_FEATURES, 0.5),
+              "comparison": dict.fromkeys(COMPARISON_FEATURES, 0.25),
+          }
+          request = urllib.request.Request(
+              "http://localhost:8000/predict",
+              data=json.dumps(payload).encode(),
+              headers={"Content-Type": "application/json"},
+          )
+          body = json.loads(urllib.request.urlopen(request, timeout=30).read())
+          print(json.dumps(body, indent=2))
+
+          for field in ("predicted_class", "label", "description", "confidence",
+                        "probabilities", "model_version"):
+              assert field in body, f"response is missing {field!r}"
+          assert body["predicted_class"] in (0, 1, 2)
+          assert 0.0 <= body["confidence"] <= 1.0
+          # The baseline exposes no probabilities; a real pipeline must.
+          assert body["probabilities"], "no probabilities - is this really the artifact?"
+          PY
+
+      # A container that runs as root defeats the Dockerfile's USER directive, and nothing
+      # else in this pipeline would notice.
+      - name: Runs as a non-root user
+        run: |
+          uid=$(docker exec api-model id -u)
+          echo "Container UID: $uid"
+          [ "$uid" != "0" ] || { echo "::error::Container is running as root."; exit 1; }
+
+      - name: Container logs
+        if: always()
+        run: docker logs api-model || true
+
+      - name: Stop
+        if: always()
+        run: docker rm -f api-model || true
