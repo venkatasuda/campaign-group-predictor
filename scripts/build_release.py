@@ -46,6 +46,10 @@ ALLOWED_DIRECTORIES: list[str] = [
     "terraform",
     "notebooks",
     ".github",
+    # Exported figures. `reports/` itself is allow-listed file by file because it accumulates
+    # scratch output, but the figures are referenced by the report and are useless to a
+    # reviewer if they arrive as broken links.
+    "reports/figures",
 ]
 
 #: Individual files at the project root.
@@ -70,16 +74,20 @@ ALLOWED_FILES: list[str] = [
 #: Reports ship selectively. `reports/` also accumulates scratch output, older conversions
 #: and Word lock files, and shipping four unsynchronised versions of one document is worse
 #: than shipping none - a reader cannot tell which is authoritative.
+#: ONE report ships. REPORT.md, FINAL_REPORT.md and PEER_REVIEW_SUMMARY.md remain in the
+#: repository as working material and are deliberately absent from this list: a reviewer
+#: receiving four documents that quote the same figures cannot tell which is authoritative,
+#: and only one of them can be right when they drift.
 ALLOWED_REPORT_FILES: list[str] = [
-    "reports/REPORT.md",
-    "reports/PEER_REVIEW_SUMMARY.md",
+    "reports/PAYBACK_Case_Study_Report.md",
+    "reports/submission.docx",
     "reports/findings.json",
+    "reports/advanced_diagnostics.json",
     "reports/advanced_experiments.json",
     "reports/latency.json",
     "reports/model_leaderboard.csv",
     "reports/campaign_outcomes.csv",
     "reports/decision_sensitivity.csv",
-    "reports/submission.docx",
 ]
 
 #: The trained model ships; it is the deliverable. metrics.json ships with it because it is
@@ -174,10 +182,29 @@ def guard(paths: list[Path], dry_run: bool = False) -> list[str]:
     # Positive assertions. Their absence is what made the last archive look dishonest: the
     # documentation described CI, and the workflow file had been dropped by the packaging
     # step rather than being missing from the project.
-    required = ["src/api/main.py", "README.md"]
+    required = ["src/api/main.py", "README.md", "reports/PAYBACK_Case_Study_Report.md"]
     for name in required:
         if Path(name) not in paths:
             problems.append(f"MISSING required file: {name}")
+
+    # Exactly one report, enforced rather than trusted.
+    #
+    # The repository still holds REPORT.md, FINAL_REPORT.md and PEER_REVIEW_SUMMARY.md as
+    # working material. Any of them reaching the archive recreates the problem the single-report
+    # decision was made to solve: four documents quoting the same figures, only one of which can
+    # be right after they drift.
+    superseded = [
+        "reports/REPORT.md",
+        "reports/FINAL_REPORT.md",
+        "reports/PEER_REVIEW_SUMMARY.md",
+        "reports/REPORT.docx",
+    ]
+    for name in superseded:
+        if Path(name) in paths:
+            problems.append(
+                f"SUPERSEDED document in the archive: {name}. Only "
+                "reports/PAYBACK_Case_Study_Report.md ships."
+            )
 
     # The artifact is required to *ship* and impossible to have in CI.
     #

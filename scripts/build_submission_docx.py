@@ -33,19 +33,18 @@ from docx.shared import Pt, RGBColor
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
-#: Reading order for a reviewer, not filesystem order. The report answers the brief; the
-#: model card and validation plan support it; architecture and walkthrough describe the
-#: system; the README is reference. The peer-review summary is last because it is a record
-#: of how the work was critiqued rather than part of the answer.
+#: ONE authoritative report.
+#:
+#: This previously concatenated eight documents, which produced a submission where the same
+#: figures appeared in several places and could disagree - and once did. The case study report
+#: now absorbs the modelling narrative, model card, validation plan and architecture into a
+#: single document, so there is exactly one place a reviewer reads and exactly one place a
+#: number can be wrong.
+#:
+#: The source documents remain in the repository as working material. They are not part of the
+#: submitted deliverable.
 DOCUMENTS: list[tuple[str, str]] = [
-    ("reports/REPORT.md", "Report"),
-    ("docs/model_card.md", "Model Card and ADR-001"),
-    ("docs/validation_plan.md", "Business Impact and Validation Plan"),
-    ("docs/architecture.md", "Architecture"),
-    ("docs/WALKTHROUGH.md", "Code Walkthrough"),
-    ("README.md", "README"),
-    ("terraform/README.md", "Infrastructure as Code"),
-    ("reports/PEER_REVIEW_SUMMARY.md", "Peer Review — Request and Resolutions"),
+    ("reports/PAYBACK_Case_Study_Report.md", "Case Study Report"),
 ]
 
 CODE_FONT = "Consolas"

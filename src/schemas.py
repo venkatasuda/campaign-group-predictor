@@ -226,7 +226,18 @@ class PredictionResponse(BaseModel):
     label: str = Field(..., description="Machine-readable class label.")
     description: str = Field(..., description="Business meaning of the predicted class.")
     recommended_action: str = Field(..., description="What the campaign manager should do.")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Probability of the winning class.")
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "UNCALIBRATED probability of the winning class, as produced by the forest. "
+            "Isotonic calibration was evaluated and rejected (6.1% ECE improvement against a "
+            "pre-stated 10% rule), so this value ranks reliably but should not be read as a "
+            "business probability - a stated 0.61 does not mean 61 campaigns in 100. Use it "
+            "for the confidence gate and for ordering, not for multiplying by money."
+        ),
+    )
     probabilities: dict[str, float] = Field(
         default_factory=dict, description="Probability per class label."
     )

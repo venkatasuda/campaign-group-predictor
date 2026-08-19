@@ -225,7 +225,7 @@ config change, not a retrain.
 
 | Question | File |
 |---|---|
-| What did the data actually say? | `notebooks/01_analysis.ipynb` |
+| What did the data actually say? | `notebooks/01_case_study_analysis.ipynb` |
 | What are the numbers and the caveats? | `reports/REPORT.md` |
 | How do the components fit together? | `docs/architecture.md` |
 | What is this model *not* fit for? | `docs/model_card.md` |

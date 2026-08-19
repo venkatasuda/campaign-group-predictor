@@ -51,54 +51,37 @@ from src.constants import (
 
 __all__ = [
     # section 1 - data quality
-    "assert_column_contract",
-    "data_quality_report",
-    "dataset_facts",
-    "feature_contract",
-    "missing_values_report",
+    "assert_column_contract", "data_quality_report", "dataset_facts", "feature_contract", "missing_values_report",
+
     # section 2 - outcome distribution
-    "outcome_shares",
-    "outcome_table",
-    "plot_campaign_outcomes",
+    "outcome_shares", "outcome_table", "plot_campaign_outcomes",
+
     # section 3 - post-campaign columns
-    "leakage_association",
-    "leakage_cv_comparison",
+    "leakage_association", "leakage_cv_comparison",
+
     # section 4 - exploratory
-    "plot_feature_distributions",
-    "redundancy_report",
-    "show_pairwise_signal",
-    "show_time_ordering",
-    # section 5 - symmetry
-    "position_bias_table",
-    "show_swap_validation",
-    "show_symmetry_diagnosis",
+    "plot_feature_distributions", "redundancy_report", "show_pairwise_signal", "show_time_ordering",
+
+    #section 5 - symmetry
+    "position_bias_table","show_swap_validation","show_symmetry_diagnosis",
+
     # section 6 - modelling
-    "champion_verdict",
-    "show_confusion",
-    "split_summary",
-    "style_leaderboard",
+    "champion_verdict","show_confusion", "split_summary", "style_leaderboard",
+
     # section 7 - calibration
-    "apply_calibration_rule",
-    "calibration_table",
-    "plot_reliability",
+    "apply_calibration_rule","calibration_table","plot_reliability",
+
     # section 8 - explainability
-    "plot_horizontal_importance",
-    "show_shap_importance",
+    "plot_horizontal_importance","show_shap_importance",
+
     # section 8.2 - minimal model
-    "minimal_model_comparison",
-    "minimal_model_symmetry",
+    "minimal_model_comparison","minimal_model_symmetry",
+
     # section 9 - business lift
-    "cost_sensitivity_table",
-    "invariance_table",
-    "lift_summary",
-    "plot_strategies",
-    "strategy_table",
+    "cost_sensitivity_table","invariance_table","lift_summary","plot_strategies","strategy_table",
+
     # section 8.1 - decision-support diagnostics
-    "decline_rule_summary",
-    "gate_summary",
-    "plot_feature_sweep",
-    "plot_learning_curve",
-    "plot_operating_points",
+    "decline_rule_summary","gate_summary","plot_feature_sweep","plot_learning_curve","plot_operating_points",
 ]
 
 #: One palette for the whole notebook. Red is reserved for "unprofitable / nothing worked",
@@ -371,9 +354,19 @@ def plot_feature_distributions(df: pd.DataFrame, columns: list[str] | None = Non
     for ax, col in zip(axes.ravel(), columns, strict=False):
         sns.histplot(df[col].dropna(), ax=ax, bins=40, kde=True, color=COLOUR_NEUTRAL)
         ax.set_title(col)
+        # Per-panel labels are cleared and replaced with one shared pair below. Repeating
+        # "feature value" eight times is noise; omitting it entirely - which this function
+        # previously did - leaves a reader unable to say what either axis measures.
         ax.set_xlabel("")
         ax.set_ylabel("")
-    fig.suptitle("Representative feature distributions", y=1.01)
+
+    fig.supxlabel("feature value (units are anonymised and differ per column)", y=-0.02)
+    fig.supylabel("number of campaigns")
+    fig.suptitle(
+        "Representative feature distributions\n"
+        "8 of 67 columns; the curve is a smoothed density, not a fitted model",
+        y=1.04,
+    )
     fig.tight_layout()
     return fig
 
@@ -454,15 +447,18 @@ def show_pairwise_signal(x: pd.DataFrame, y: pd.Series) -> PairwiseSignal:
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 4.5))
     signal.plot.bar(ax=axes[0], color=COLOUR_NEUTRAL)
-    axes[0].set_title("Correlation of $g1_i - g2_i$ with the target")
-    axes[0].set_ylabel("Pearson r")
+    axes[0].set_title("Does each $g1_i - g2_i$ difference predict the outcome?")
+    axes[0].set_xlabel("difference feature  (diff_i = g1_i − g2_i)")
+    axes[0].set_ylabel("Pearson r with the target\n(0 = no relationship, ±1 = perfect)")
+    axes[0].axhline(0, color="grey", linewidth=0.8)
 
     # The second panel guards against reading the first as six independent signals: if the
     # strongest differences are correlated with each other, they are one finding, not six.
     sns.heatmap(
         diffs[signal.index[:6]].corr(), annot=True, fmt=".2f", cmap="RdBu_r", center=0, ax=axes[1]
     )
-    axes[1].set_title("Correlation among the strongest differences")
+    axes[1].set_title("...and are the strongest ones telling us different things?")
+    axes[1].set_xlabel("each cell = correlation between two differences, NOT with the target")
     fig.tight_layout()
 
     display(signal.head(5).to_frame("correlation with target").style.format("{:.4f}"))
@@ -605,7 +601,7 @@ def split_summary(
                 "training campaigns",
                 "after symmetry augmentation" if augmented else "augmentation disabled",
                 "calibration (held out; calibrator, thresholds and gate selected here)",
-                "test (evaluated once, on the champion only)",
+                "held-out confirmation set; not used for champion selection",
             ],
         },
         index=["train", "fit", "calibration", "test"],

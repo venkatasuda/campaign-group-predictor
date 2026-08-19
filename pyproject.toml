@@ -123,13 +123,13 @@ branch = true
 # project advertised a 95% gate in three documents while configuring none at all; a
 # threshold that is not enforced is a claim, not a gate.
 #
-# Measured: 92.40% branch coverage over 1,890 statements, with src/training/train.py
-# included (it sits at 72% and is the weakest module - see below). The floor is set at 90
-# rather than 92 so that a small, legitimate addition does not turn the build red before
-# anyone has had a chance to write its test; the gap is deliberate slack, not a hiding
-# place. Raise it when coverage rises. Never lower it to make a red build green.
+# Measured: 91.43% branch coverage over 2,016 statements, 427 tests, with
+# src/training/train.py included (it sits at 70% and is the weakest module - see below). The
+# floor is set at 90 rather than 91 so that a small, legitimate addition does not turn the
+# build red before anyone has had a chance to write its test; the gap is deliberate slack,
+# not a hiding place. Raise it when coverage rises. Never lower it to make a red build green.
 #
-# train.py at 72% is the honest weak point: the uncovered ranges are the calibration branch
+# train.py at 70% is the honest weak point: the uncovered ranges are the calibration branch
 # and the MLflow logging path, both of which need a full training run rather than the --fast
 # smoke runs the suite uses. That is a real gap, not an argument for excluding the file.
 fail_under = 90

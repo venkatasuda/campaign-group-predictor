@@ -30,7 +30,7 @@ targeting at all.
 
 | Challenge item | Where |
 |---|---|
-| ML Q1 — outcome percentages | `notebooks/01_analysis.ipynb`, `artifacts/metrics.json`, `src/training/evaluation.py::campaign_outcome_distribution` |
+| ML Q1 — outcome percentages | `notebooks/01_case_study_analysis.ipynb`, `artifacts/metrics.json`, `src/training/evaluation.py::campaign_outcome_distribution` |
 | ML Q2 — predictive model | `src/training/`, `src/predictors.py` |
 | ML Q3 — lift + validation | `docs/validation_plan.md`, `src/training/evaluation.py::estimate_business_lift` |
 | Eng 1 — architecture + sequence diagrams | `docs/architecture.md` |
@@ -41,22 +41,24 @@ targeting at all.
 
 ## Headline result
 
-Champion **random forest**, selected automatically on cross-validated accuracy and scored
-**once** on a 1,324-campaign test set it never saw during development.
+Champion **random forest**, selected automatically on cross-validated accuracy and evaluated on a
+held-out confirmation set of 1,324 campaigns that did not influence champion selection.
 
 | | |
 |---|---|
 | Campaign success rate | **54.83%** |
 | Best naive strategy ("always group 1") | 46.45% |
 | **Lift** | **+8.38 pp**, 95% CI [+5.66, +11.18] |
-| With a frozen confidence gate | **71.6%** accuracy on the **34.8%** of campaigns the model is confident about |
+| Frozen confidence gate | **71.58%** accuracy on **34.82%** of holdout campaigns; always-Group-1 scores **57.48%** on the same subset (**+14.10 pp** same-subset difference) |
 
 Three things this number is not: it is not confirmed ROI (accuracy weights every campaign
 equally, euros do not); it is not a claim that random forest is the best model (its 0.40-point
 margin over XGBoost is inside noise, and nested CV ranks them the other way); and it is not
 evenly distributed across classes — **class-0 recall is 8.4%**, and class 0 is where money is
 saved rather than earned. All three are treated as findings rather than footnotes in
-[`reports/REPORT.md`](reports/REPORT.md).
+[`reports/PAYBACK_Case_Study_Report.md`](reports/PAYBACK_Case_Study_Report.md) — the single
+authoritative report. `REPORT.md`, `FINAL_REPORT.md` and `PEER_REVIEW_SUMMARY.md` remain in the
+repository as working material and are excluded from the submission archive.
 
 ---
 
@@ -71,7 +73,8 @@ pip install -r requirements-optional.txt            # optional — widens the mo
 # 2. Data — place the provided customerGroups.csv into data/
 #    (not committed: the dataset is confidential and must not be redistributed)
 
-# 3. Train — use `make train`, or the full command below. The flags are not optional:
+# 3. Train — `make train`, or the full command below (Windows has no make; use the command).
+#    The flags are not optional:
 #    --holdout-seed fixes WHICH campaigns are held out (omitting it falls back to 42 and
 #    produces a different test set), and --calibrate reserves the 1,060-row calibration
 #    split that makes thresholds selectable without touching test. Every number in
@@ -300,9 +303,10 @@ campaign-group-predictor/
 ├── tests/                    # 427 tests across 17 modules
 ├── docs/                     # architecture.md, validation_plan.md, model_card.md, WALKTHROUGH.md
 ├── notebooks/
-│   ├── 01_analysis.ipynb     # the analysis narrative, reproducible end to end
+│   ├── 01_case_study_analysis.ipynb   # the analysis that answers the brief
+│   ├── 02_optional_diagnostics.ipynb  # deeper diagnostics; writes advanced_diagnostics.json
 │   └── analysis_support.py   # presentation helpers - NOT in src/, see below
-├── reports/                  # REPORT.md, findings.json, figures/, PEER_REVIEW_SUMMARY.md
+├── reports/                  # PAYBACK_Case_Study_Report.md (authoritative), findings.json, figures/
 ├── artifacts/                # model.pkl, metrics.json (git-ignored)
 ├── data/                     # customerGroups.csv (git-ignored, confidential)
 ├── Dockerfile / Dockerfile.frontend / cloudbuild.frontend.yaml
@@ -782,6 +786,6 @@ to misallocating one campaign in twenty. It is a required, explicit input; see
   (standard error 1.37 pp) where 5,296 out-of-fold rows would give roughly 0.68 pp, halving
   the width of the lift interval. Not adopted because it refines a number without changing a
   decision — the lift is already significantly positive and the champion's margin is already
-  inside noise. Reasoning in full at `reports/FINAL_REPORT.md` §8.6.
+  inside noise. Reasoning in full at `reports/PAYBACK_Case_Study_Report.md` §9.
 - The frontend exposes 67 numeric inputs; a production version would pull group
   statistics from the customer database instead of manual entry.

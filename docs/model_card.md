@@ -210,7 +210,11 @@ subject to coverage ≥ 30%*), then frozen and applied to the test set once.
 | Decide everything | 100% (n=1,324) | 54.83% | 46.45% | +8.38 pp |
 | **Confidence ≥ 0.60 (frozen)** | **34.8%** (n=461) | **71.58%** | **57.48%** | **+14.10 pp** |
 
-Selected at 73.9% on calibration, delivered 71.58% on test — so the threshold generalised.
+The frozen threshold transferred to the holdout with **71.58% accuracy at 34.82% coverage**,
+against **73.86% at 33.21% coverage** during calibration selection. The 2.28-point difference may
+reflect ordinary sampling variation, threshold-selection optimism, or both; a single comparison
+cannot separate them, and "the threshold generalised" would claim more than one observation
+supports.
 
 **The fourth column is the one that matters, and it was missing from an earlier version of
 this document.** Quoting 71.58% against the baseline's *overall* 46.45% would compare a

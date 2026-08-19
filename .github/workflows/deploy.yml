@@ -6,7 +6,12 @@ name: Deploy (INCOMPLETE - cannot run end to end without an artifact source)
 # Every step here is real except one: the artifact fetch. `artifacts/model.pkl` is gitignored,
 # a fresh checkout never contains it, and nothing in this file downloads it - so a dispatch
 # stops at the guard below rather than deploying. Deployment today is manual, from a
-# controlled local environment, because the approved model does not live in Git.
+# controlled local environment, because the model artifact does not live in Git.
+#
+# Note the deliberate absence of the word "approved". There is no approval workflow, no model
+# registry and no promotion gate - the artifact is whatever the documented training command
+# produced, verified against metrics.json by scripts/check_consistency.py. Calling it
+# "approved" would name a control that does not exist.
 #
 # That is a deliberate scope decision, not an oversight: putting a 47 MB binary in the
 # repository to make this workflow green would trade a real problem for a worse one. The
@@ -57,13 +62,14 @@ jobs:
       # `docker build` would happily produce an image whose COPY finds only .gitkeep.
       #
       # The image would start, answer its health probe, and serve the majority-class
-      # fallback. Failing here is the point: a deploy that cannot find an approved model
+      # fallback. Failing here is the point: a deploy that cannot find a model artifact
       # should stop before it builds, not after it is live.
       #
-      # In a full setup this step downloads the approved artifact from the model registry
-      # or a versioned GCS bucket. Until that exists it is an explicit, loud gap rather
-      # than a silent one.
-      - name: Fetch the approved model artifact
+      # In a fuller setup this step would retrieve a versioned artifact from a bucket or a
+      # registry, and THAT is where an approval gate would live. Neither exists today, so
+      # this step is an explicit, loud gap rather than a silent one - and the artifact is
+      # simply the output of the documented training command, not an approved release.
+      - name: Fetch the model artifact
         run: |
           if [ ! -f artifacts/model.pkl ]; then
             echo "::error::No artifacts/model.pkl present."
