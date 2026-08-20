@@ -93,50 +93,6 @@
     "accuracy": 0.5483,
     "class_0_recall": 0.08408408408408409
   },
-  "feature_count_sweep": [
-    {
-      "n_features": 1,
-      "cv_mean": 0.6013,
-      "cv_std": 0.0088,
-      "pct_of_best": 100.0
-    },
-    {
-      "n_features": 3,
-      "cv_mean": 0.5413,
-      "cv_std": 0.0107,
-      "pct_of_best": 90.0
-    },
-    {
-      "n_features": 5,
-      "cv_mean": 0.5751,
-      "cv_std": 0.0222,
-      "pct_of_best": 95.6
-    },
-    {
-      "n_features": 10,
-      "cv_mean": 0.5788,
-      "cv_std": 0.0091,
-      "pct_of_best": 96.3
-    },
-    {
-      "n_features": 20,
-      "cv_mean": 0.5798,
-      "cv_std": 0.0097,
-      "pct_of_best": 96.4
-    },
-    {
-      "n_features": 40,
-      "cv_mean": 0.5822,
-      "cv_std": 0.0042,
-      "pct_of_best": 96.8
-    },
-    {
-      "n_features": 67,
-      "cv_mean": 0.5758,
-      "cv_std": 0.0124,
-      "pct_of_best": 95.8
-    }
-  ],
   "feature_block_ablation": [
     {
       "block": "c_2 alone",

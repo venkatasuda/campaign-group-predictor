@@ -12,6 +12,7 @@ RUN pip install --upgrade pip && \
     pip install streamlit==1.40.2 requests==2.32.3 pandas==2.2.3
 
 COPY frontend ./frontend
+COPY .streamlit ./.streamlit
 
 RUN useradd --create-home --uid 1000 appuser && chown -R appuser:appuser /app
 USER appuser

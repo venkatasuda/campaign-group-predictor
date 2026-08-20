@@ -1,4 +1,4 @@
-"""Presentation helpers for ``01_analysis.ipynb``.
+"""Presentation helpers for ``01_case_study_analysis.ipynb`` and ``02_optional_diagnostics.ipynb``.
 
 Why this module exists
 ----------------------

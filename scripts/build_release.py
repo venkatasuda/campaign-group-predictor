@@ -78,17 +78,23 @@ ALLOWED_FILES: list[str] = [
 #: repository as working material and are deliberately absent from this list: a reviewer
 #: receiving four documents that quote the same figures cannot tell which is authoritative,
 #: and only one of them can be right when they drift.
+#: One report, in one format. The Markdown source ships; the PDF is emailed separately.
+#:
+#: No .docx here, deliberately. Shipping Markdown AND Word AND emailing a PDF puts three
+#: copies of the same document in front of a reviewer, and the moment one is regenerated and
+#: the others are not, two of them are wrong. `reports/` has already accumulated REPORT.docx
+#: and submission.docx from earlier conversions - both built from a superseded source.
 ALLOWED_REPORT_FILES: list[str] = [
     "reports/PAYBACK_Case_Study_Report.md",
-    "reports/submission.docx",
     "reports/findings.json",
     "reports/advanced_diagnostics.json",
-    "reports/advanced_experiments.json",
     "reports/latency.json",
     "reports/model_leaderboard.csv",
     "reports/campaign_outcomes.csv",
-    "reports/decision_sensitivity.csv",
 ]
+# Dropped: advanced_experiments.json and decision_sensitivity.csv. Both predate the current
+# notebooks and nothing regenerates them, so neither can be verified against the shipped
+# artifact. An unverifiable file is worse than an absent one.
 
 #: The trained model ships; it is the deliverable. metrics.json ships with it because it is
 #: the plain-text record of what produced it.
@@ -198,6 +204,8 @@ def guard(paths: list[Path], dry_run: bool = False) -> list[str]:
         "reports/FINAL_REPORT.md",
         "reports/PEER_REVIEW_SUMMARY.md",
         "reports/REPORT.docx",
+        "reports/submission.docx",
+        "reports/PAYBACK_Case_Study_Report.docx",
     ]
     for name in superseded:
         if Path(name) in paths:

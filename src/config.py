@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     #:
     #: **Defaults to 0.0: disabled.** This is a *fitted parameter*, not a constant. It has
     #: to be selected on a held-out calibration split for the specific deployed model - the
-    #: analysis in `notebooks/01_analysis.ipynb` §8.1 does exactly that - and a value
+    #: analysis in `notebooks/01_case_study_analysis.ipynb` does exactly that - and a value
     #: chosen for one champion is meaningless for another. Shipping a hard-coded number
     #: here would silently apply one model's operating point to a different model.
     #:

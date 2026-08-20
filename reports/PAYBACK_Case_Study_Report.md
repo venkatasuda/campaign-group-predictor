@@ -224,7 +224,8 @@ It supports an "automate the confident third, review the rest" pattern — 461 d
 — and requires operational and online validation before any automation. **Disabled by default:** the
 review capacity it assumes has not been agreed with the business.
 
-> **Figure 4** — `reports/figures/10_operating_points.png`
+> **Figure 4** — `reports/figures/05_calibration.png` — reliability of the uncalibrated model,
+> which is what the confidence gate is thresholding on.
 
 ### What the model relies on
 
