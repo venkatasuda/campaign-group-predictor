@@ -9,7 +9,7 @@
 # Serving on 3.11 while training on 3.12 was the state before this change. It worked, and it
 # was luck rather than design. The versions in requirements-serve.txt are pinned for the
 # same reason and must move together with this line.
-FROM python:3.12-slim AS base
+FROM python:3.14-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
