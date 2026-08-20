@@ -8,8 +8,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# Pinned exactly. The frontend image is small and its dependency set is short enough to
+# declare inline; every addition here must match an import in frontend/app.py, and an import
+# added there without a matching line becomes a ModuleNotFoundError at page load - which
+# happens after the container starts and its health probe passes, so nothing catches it
+# before a user does.
 RUN pip install --upgrade pip && \
-    pip install streamlit==1.40.2 requests==2.32.3 pandas==2.2.3
+    pip install streamlit==1.40.2 requests==2.32.3 pandas==2.2.3 plotly==5.24.1
 
 COPY frontend ./frontend
 COPY .streamlit ./.streamlit
