@@ -155,6 +155,7 @@ target-version = "py310"
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM"]
 ignore = ["B008"]  # FastAPI Depends() in defaults is idiomatic
+ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101"]
@@ -194,4 +195,3 @@ exclude_dirs = ["tests", ".venv", "htmlcov"]
 
 
 [tool.ruff.lint]
-ignore = ["E501"]
