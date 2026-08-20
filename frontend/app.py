@@ -8,7 +8,9 @@ from __future__ import annotations
 import os
 from html import escape
 from typing import Any
-
+# ruff: noqa: E501
+import streamlit as st
+...
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
