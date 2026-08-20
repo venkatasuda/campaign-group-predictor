@@ -194,4 +194,3 @@ show_error_codes = true
 exclude_dirs = ["tests", ".venv", "htmlcov"]
 
 
-[tool.ruff.lint]
