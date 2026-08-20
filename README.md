@@ -708,10 +708,11 @@ Locally: `docker compose up --build` (API on `:8000`, UI on `:8501`).
 
 | Service | URL |
 |---|---|
-| Prediction API | <https://campaign-api-395867964283.europe-west3.run.app> |
-| Interactive API docs | <https://campaign-api-395867964283.europe-west3.run.app/docs> |
-| Health check | <https://campaign-api-395867964283.europe-west3.run.app/health> |
-| Web interface | <https://campaign-frontend-395867964283.europe-west3.run.app> |
+| Prediction API | <https://campaign-api-htvxic2lsq-ey.a.run.app> |
+| Interactive API docs | <https://campaign-api-htvxic2lsq-ey.a.run.app/docs> |
+| Health check | <https://campaign-api-htvxic2lsq-ey.a.run.app/health> |
+| Model info and lineage | <https://campaign-api-htvxic2lsq-ey.a.run.app/model/info> |
+| Web interface | <https://campaign-frontend-htvxic2lsq-ey.a.run.app> |
 
 Both services run on Cloud Run in `europe-west3`, scale to zero when idle, and are built
 from this repository — the API from `Dockerfile`, the frontend from `Dockerfile.frontend`
