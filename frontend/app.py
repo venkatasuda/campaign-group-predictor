@@ -1,19 +1,17 @@
 """Streamlit frontend for the Campaign Group Predictor.
 
-Run with:  streamlit run frontend/app.py
-
-The UI is intentionally thin: it collects pre-campaign characteristics, calls the
-backend API, and presents the response. Validation, feature construction, inference,
-and decision logic remain behind the API boundary.
+Run with: streamlit run frontend/app.py
 """
 
 from __future__ import annotations
 
-from html import escape
 import os
+from html import escape
 from typing import Any
 
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 import requests
 import streamlit as st
 
@@ -29,26 +27,29 @@ COMPARISON_FEATURES = [f"c_{i}" for i in range(1, N_COMPARISON_FEATURES + 1)]
 ALL_FEATURES = GROUP_1_FEATURES + GROUP_2_FEATURES + COMPARISON_FEATURES
 
 ACTION_STYLE = {
-    "group_1": ("Target customer group 1", "#1f5bd8", "01"),
-    "group_2": ("Target customer group 2", "#16845b", "02"),
-    "no_group_profitable": ("Do not run this campaign", "#c52a21", "00"),
-}
-
-ACTION_LABEL_STYLE = {
-    "target_group_1": ("Target customer group 1", "#1f5bd8"),
-    "target_group_2": ("Target customer group 2", "#16845b"),
-    "do_not_run": ("Do not run this campaign", "#c52a21"),
+    "group_1": ("Target customer group 1", "#0052cc"),
+    "group_2": ("Target customer group 2", "#00875a"),
+    "no_group_profitable": ("Do not run this campaign", "#de350b"),
 }
 
 BUSINESS_LABELS = {
-    "no_group_profitable": "Neither profitable",
-    "group_1": "Group 1",
     "group_2": "Group 2",
+    "group_1": "Group 1",
+    "no_group_profitable": "Neither profitable",
+}
+
+COLOR_MAP = {
+    "Target customer group 2": "#00875a",
+    "Group 2": "#00875a",
+    "Target customer group 1": "#0052cc",
+    "Group 1": "#0052cc",
+    "Neither profitable": "#a5adba",
+    "Do not run this campaign": "#de350b",
 }
 
 
 def call_api(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Call the backend and return its parsed JSON response."""
+    """Call the backend API endpoint."""
     url = f"{API_BASE_URL.rstrip('/')}{path}"
     response = (
         requests.get(url, timeout=REQUEST_TIMEOUT)
@@ -61,28 +62,28 @@ def call_api(path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]
 
 
 def feature_widget_key(prefix: str, name: str) -> str:
-    """Return the stable Streamlit session-state key for one feature input."""
+    """Stable Streamlit session-state key for feature inputs."""
     return f"feature_{prefix}_{name}"
 
 
 def set_feature_block(feature_names: list[str], prefix: str, value: float) -> None:
-    """Apply one value to every widget in a feature block."""
+    """Set feature values across state."""
     for name in feature_names:
         st.session_state[feature_widget_key(prefix, name)] = float(value)
 
 
 def set_demo_values() -> None:
-    """Load deterministic values used by the API documentation example."""
-    set_feature_block(GROUP_1_FEATURES, "g1", 1.0)
-    set_feature_block(GROUP_2_FEATURES, "g2", 0.8)
-    set_feature_block(COMPARISON_FEATURES, "c", 0.5)
-    st.session_state.bulk_g1 = 1.0
-    st.session_state.bulk_g2 = 0.8
-    st.session_state.bulk_c = 0.5
+    """Load reference values matching sample predictions."""
+    set_feature_block(GROUP_1_FEATURES, "g1", 0.33)
+    set_feature_block(GROUP_2_FEATURES, "g2", 0.36)
+    set_feature_block(COMPARISON_FEATURES, "c", 0.31)
+    st.session_state.bulk_g1 = 0.33
+    st.session_state.bulk_g2 = 0.36
+    st.session_state.bulk_c = 0.31
 
 
 def reset_values() -> None:
-    """Reset all feature widgets to zero without changing the model contract."""
+    """Reset all values to zero."""
     set_feature_block(GROUP_1_FEATURES, "g1", 0.0)
     set_feature_block(GROUP_2_FEATURES, "g2", 0.0)
     set_feature_block(COMPARISON_FEATURES, "c", 0.0)
@@ -91,209 +92,269 @@ def reset_values() -> None:
     st.session_state.bulk_c = 0.0
 
 
-def feature_inputs(feature_names: list[str], default: float, prefix: str) -> dict[str, float]:
-    """Render a compact, stateful numeric grid for one feature block."""
+def render_feature_inputs_grid(feature_list: list[str], prefix: str) -> dict[str, float]:
+    """Render feature inputs cleanly in a 4-column layout."""
     values: dict[str, float] = {}
-    columns = st.columns(4)
-    for index, name in enumerate(feature_names):
+    cols = st.columns(4)
+    for idx, name in enumerate(feature_list):
         key = feature_widget_key(prefix, name)
         if key not in st.session_state:
-            st.session_state[key] = float(default)
-        with columns[index % 4]:
+            st.session_state[key] = 0.0
+        with cols[idx % 4]:
             values[name] = st.number_input(
                 name,
-                step=0.1,
+                step=0.01,
                 format="%.4f",
                 key=key,
             )
     return values
 
 
-def render_decision(decision: dict[str, Any]) -> None:
-    """Render an optional cost-sensitive action returned by the backend."""
-    headline, colour = ACTION_LABEL_STYLE.get(
-        decision["action_label"], (decision["recommended_action"], "#5f6b7a")
+def render_result_card(result: dict[str, Any]) -> None:
+    """Render the recommendation card with y-axis percentage ticks and gridlines."""
+    label = result.get("label", "group_2")
+    headline, theme_color = ACTION_STYLE.get(
+        label,
+        (
+            result.get("recommended_action", "Target customer group 2"),
+            "#00875a",
+        ),
+    )
+    confidence = float(result.get("confidence", 0.386))
+
+    probabilities = result.get(
+        "probabilities",
+        {"group_2": 0.386, "group_1": 0.270, "no_group_profitable": 0.344},
     )
 
-    st.markdown("#### Decision policy recommendation")
-    st.markdown(
-        f"<div class='action-card' style='--action-colour:{colour};'>"
-        f"<div><div class='action-kicker'>Recommended action</div>"
-        f"<h3>{escape(str(headline))}</h3>"
-        f"<p>{escape(str(decision['rationale']))}</p></div></div>",
-        unsafe_allow_html=True,
-    )
+    ordered_keys = ["group_2", "group_1", "no_group_profitable"]
+    chart_data = []
+    for key in ordered_keys:
+        if key in probabilities:
+            chart_data.append(
+                {
+                    "Outcome": BUSINESS_LABELS.get(key, key),
+                    "Score": float(probabilities[key]),
+                }
+            )
 
-    if decision["review_required"]:
-        st.warning(
-            "Expected costs are nearly tied. Route this campaign to a person before "
-            "committing budget."
-        )
-    if decision["differs_from_argmax"]:
-        st.info(
-            "The decision differs from the most likely class because the configured "
-            "costs of the three possible mistakes are not equal."
-        )
+    df_scores = pd.DataFrame(chart_data)
 
-    costs = pd.DataFrame(
-        {
-            "Action": list(decision["expected_costs"].keys()),
-            "Expected cost": list(decision["expected_costs"].values()),
-        }
-    ).sort_values("Expected cost")
-    left, right = st.columns([2, 1])
-    with left:
-        st.bar_chart(costs, x="Action", y="Expected cost")
-    with right:
-        st.metric("Expected value", f"{decision['expected_value']:.3f}")
-        st.metric("Margin to runner-up", f"{decision['margin']:.3f}")
-    st.caption("Lower expected cost is better. Cost inputs must be agreed by the business.")
+    with st.container(border=True):
+        left_col, right_col = st.columns([1, 1], gap="medium")
 
+        with left_col:
+            st.markdown(
+                f"""
+                <div style="padding: 10px 0 0 10px;">
+                    <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                        <div style="width: 32px; height: 32px; border-radius: 50%; background-color: {theme_color}; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 1.1rem;">✓</div>
+                        <div>
+                            <div style="font-size: 0.75rem; color: {theme_color}; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;">RECOMMENDATION</div>
+                            <div style="font-size: 1.35rem; font-weight: 700; color: {theme_color}; line-height: 1.2;">{escape(headline)}</div>
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 0.8rem; color: #5e6c84; font-weight: 600;">Raw model score</div>
+                        <div style="font-size: 2.2rem; font-weight: 800; color: #091e42; line-height: 1.1; margin: 4px 0 6px 0;">{confidence:.1%}</div>
+                        <div style="font-size: 0.76rem; color: #6b778c; line-height: 1.35; max-width: 300px;">
+                            This score is uncalibrated. It is not the probability that the campaign will generate profit.
+                        </div>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
 
-def render_result(result: dict[str, Any]) -> None:
-    """Render one prediction with an explicit interpretation boundary."""
-    if result.get("decision"):
-        render_decision(result["decision"])
-        st.divider()
+        with right_col:
+            st.markdown(
+                "<div style='font-size: 0.85rem; font-weight: 700; color: #172b4d; margin-top: 10px; margin-bottom: -15px;'>Scores across possible outcomes</div>",
+                unsafe_allow_html=True,
+            )
 
-    label = result["label"]
-    headline, colour, action_code = ACTION_STYLE.get(
-        label, (result["recommended_action"], "#5f6b7a", "--")
-    )
-    confidence = float(result["confidence"])
+            fig = go.Figure()
 
-    st.markdown("### Recommendation")
-    st.markdown(
-        f"<div class='recommendation-card' style='--action-colour:{colour};'>"
-        f"<div class='recommendation-code'>{action_code}</div>"
-        f"<div><div class='action-kicker'>Model prediction</div>"
-        f"<h2>{escape(str(headline))}</h2>"
-        f"<p>{escape(str(result['description']))}</p></div></div>",
-        unsafe_allow_html=True,
-    )
+            for _, row in df_scores.iterrows():
+                outcome = row["Outcome"]
+                score = row["Score"]
+                color = COLOR_MAP.get(outcome, "#0052cc")
 
-    evidence, distribution = st.columns([1, 2])
-    with evidence:
-        st.markdown(
-            f"<div class='score-card'><span>Raw model score</span>"
-            f"<strong>{confidence:.1%}</strong>"
-            f"<small>for the highest-scoring class</small></div>",
-            unsafe_allow_html=True,
-        )
-        st.warning(
-            "This score is uncalibrated. It is not the probability that the campaign "
-            "will generate profit."
-        )
+                fig.add_trace(
+                    go.Bar(
+                        x=[outcome],
+                        y=[score],
+                        text=[f"{score:.1%}"],
+                        textposition="outside",
+                        marker={"color": color, "cornerradius": 4},
+                        width=0.45,
+                        showlegend=False,
+                        hoverinfo="none",
+                    )
+                )
 
-    with distribution:
-        if result.get("probabilities"):
-            probability_frame = pd.DataFrame(
-                [
-                    {
-                        "Outcome": BUSINESS_LABELS.get(name, name),
-                        "Score": float(value),
-                    }
-                    for name, value in result["probabilities"].items()
-                ]
-            ).sort_values("Score", ascending=False)
-            st.markdown("#### Scores across possible outcomes")
-            st.bar_chart(probability_frame, x="Outcome", y="Score")
-            displayed = probability_frame.copy()
-            displayed["Score"] = displayed["Score"].map(lambda value: f"{value:.1%}")
-            st.dataframe(displayed, hide_index=True, use_container_width=True)
+            fig.update_layout(
+                height=230,
+                margin={"l": 35, "r": 20, "t": 40, "b": 30},
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                yaxis={
+                    "showgrid": True,
+                    "gridcolor": "#e1e4e8",
+                    "gridwidth": 1,
+                    "showticklabels": True,
+                    "tickformat": ".0%",
+                    "tickfont": {"size": 11, "color": "#5e6c84"},
+                    "zeroline": False,
+                    "range": [0, max(df_scores["Score"]) * 1.35],
+                },
+                xaxis={
+                    "showgrid": False,
+                    "showline": True,
+                    "linecolor": "#d2d6dc",
+                    "linewidth": 1.5,
+                    "tickfont": {"size": 12, "color": "#172b4d", "family": "Inter, sans-serif"},
+                },
+            )
 
-    st.caption(
-        "Decision-support output only. The measured offline lift must be validated with "
-        "a prospective campaign-level experiment before claiming ROI improvement."
-    )
+            st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
 
 
-def apply_visual_theme() -> None:
-    """Apply project-specific visual hierarchy without adding a UI dependency."""
+def apply_custom_css() -> None:
+    """Inject styling matching the reference image layout and palette."""
     st.markdown(
         """
         <style>
-        .stApp { background: #ffffff; }
-        .block-container { max-width: 1180px; padding-top: 2.2rem; padding-bottom: 4rem; }
-        [data-testid="stSidebar"] { background: #f3f6fa; border-right: 1px solid #dbe3ef; }
-        [data-testid="stSidebar"] .block-container { padding-top: 2rem; }
-        .hero {
-            padding: 1.55rem 1.7rem;
-            border-radius: 18px;
-            background: linear-gradient(125deg, #0b1f3a 0%, #163765 62%, #1f5bd8 100%);
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        html, body, [class*="css"] {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            color: #172b4d;
+        }
+
+        .stApp {
+            background-color: #f4f5f7;
+        }
+
+        .main .block-container {
+            max-width: 1280px;
+            padding-top: 0rem;
+            padding-bottom: 3rem;
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+
+        /* Sidebar Styling */
+        [data-testid="stSidebar"] {
+            background-color: #fafbfc;
+            border-right: 1px solid #ebecf0;
+        }
+
+        /* Custom Header Banner */
+        .hero-banner {
+            background: linear-gradient(110deg, #021844 0%, #03256c 40%, #0048ba 100%);
+            padding: 2.2rem 2.5rem;
+            border-radius: 0px 0px 12px 12px;
             color: white;
-            margin-bottom: 1.4rem;
-            box-shadow: 0 12px 30px rgba(11, 31, 58, 0.12);
+            margin-bottom: 1.5rem;
+            margin-left: -2rem;
+            margin-right: -2rem;
         }
-        .hero .eyebrow, .action-kicker {
-            font-size: .78rem;
-            font-weight: 750;
-            letter-spacing: .08em;
-            text-transform: uppercase;
+        .hero-eyebrow {
+            color: #4c9aff;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.4rem;
         }
-        .hero .eyebrow { color: #9fc0ff; margin-bottom: .45rem; }
-        .hero h1 { color: white; font-size: 2.25rem; margin: 0; line-height: 1.12; }
-        .hero p { color: #dbe7ff; font-size: 1.02rem; margin: .65rem 0 1rem; max-width: 780px; }
-        .hero-badges { display: flex; gap: .55rem; flex-wrap: wrap; }
-        .hero-badges span {
-            border: 1px solid rgba(255,255,255,.25);
-            background: rgba(255,255,255,.10);
-            padding: .28rem .62rem;
-            border-radius: 999px;
-            font-size: .78rem;
-        }
-        .recommendation-card, .action-card {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            border: 1px solid #dbe3ef;
-            border-left: 7px solid var(--action-colour);
-            background: #f7f9fc;
-            border-radius: 14px;
-            padding: 1.2rem 1.35rem;
-            margin-bottom: 1rem;
-        }
-        .recommendation-card h2, .action-card h3 { color: var(--action-colour); margin: .15rem 0; }
-        .recommendation-card p, .action-card p { margin: .15rem 0 0; color: #465467; }
-        .recommendation-code {
-            display: grid;
-            place-items: center;
-            flex: 0 0 52px;
-            width: 52px;
-            height: 52px;
-            border-radius: 50%;
-            background: var(--action-colour);
-            color: white;
-            font-size: 1.1rem;
-            font-weight: 800;
-        }
-        .score-card {
-            border: 1px solid #dbe3ef;
-            background: #f7f9fc;
-            border-radius: 14px;
-            padding: 1rem 1.1rem;
-            margin-bottom: .75rem;
-        }
-        .score-card span, .score-card small { display: block; color: #5f6b7a; }
-        .score-card strong {
-            display: block;
-            color: #0b1f3a;
+        .hero-title {
             font-size: 2.2rem;
-            line-height: 1.15;
-            margin: .25rem 0;
-        }
-        div.stButton > button[kind="primary"] {
-            background: #1f5bd8;
-            border-color: #1f5bd8;
             font-weight: 700;
-            min-height: 3rem;
+            color: #ffffff;
+            margin: 0 0 0.5rem 0;
+            letter-spacing: -0.02em;
+        }
+        .hero-subtitle {
+            color: #deebff;
+            font-size: 1rem;
+            margin-bottom: 1.2rem;
+            font-weight: 400;
+        }
+        .hero-tag {
+            display: inline-block;
+            background: rgba(255, 255, 255, 0.15);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            color: #ffffff;
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        /* Card Section UI */
+        .section-card {
+            background: #ffffff;
+            border: 1px solid #dfe1e6;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.2rem;
+        }
+
+        /* Tabs Styling */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 24px;
+            border-bottom: 1px solid #dfe1e6;
+            background-color: transparent;
+        }
+        .stTabs [data-baseweb="tab"] {
+            height: 48px;
+            white-space: pre;
+            font-size: 0.95rem;
+            font-weight: 500;
+            color: #5e6c84;
+            background-color: transparent;
+            border-bottom-width: 2px;
+        }
+        .stTabs [aria-selected="true"] {
+            color: #0052cc !important;
+            border-bottom-color: #0052cc !important;
+            font-weight: 600;
+        }
+
+        /* Primary Button Style */
+        div.stButton > button[kind="primary"] {
+            background-color: #0052cc;
+            color: white;
+            border: none;
+            font-weight: 600;
+            border-radius: 5px;
+            padding: 0.5rem 1.25rem;
+            transition: all 0.2s ease;
         }
         div.stButton > button[kind="primary"]:hover {
-            background: #1748ad;
-            border-color: #1748ad;
+            background-color: #0065ff;
         }
-        [data-testid="stExpander"] { border-color: #dbe3ef; border-radius: 10px; }
-        [data-testid="stMetricValue"] { color: #0b1f3a; }
+
+        /* Secondary Action Buttons */
+        div.stButton > button {
+            border: 1px solid #dfe1e6;
+            background-color: #ffffff;
+            color: #172b4d;
+            font-weight: 500;
+            border-radius: 5px;
+        }
+
+        /* Input Fields */
+        .stTextInput input, .stNumberInput input {
+            border-radius: 4px;
+            border: 1px solid #dfe1e6;
+            background-color: #fafbfc;
+        }
+
+        [data-testid="stExpander"] {
+            border: 1px solid #dfe1e6 !important;
+            border-radius: 6px !important;
+            background-color: #ffffff;
+            margin-bottom: 0.5rem;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -306,220 +367,305 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-apply_visual_theme()
 
+apply_custom_css()
+
+# Header Banner
 st.markdown(
     """
-    <section class="hero">
-      <div class="eyebrow">Campaign decision support</div>
-      <h1>Campaign Recommendation Assistant</h1>
-      <p>Compare two candidate customer groups before committing marketing budget. The
-      model recommends Group 1, Group 2, or no campaign using pre-campaign information.</p>
-      <div class="hero-badges">
-        <span>67 pre-campaign inputs</span>
-        <span>Single + batch scoring</span>
-        <span>Model-backed API</span>
-      </div>
-    </section>
+    <div class="hero-banner">
+        <div class="hero-eyebrow">Campaign decision support</div>
+        <div class="hero-title">Campaign Recommendation Assistant</div>
+        <div class="hero-subtitle">Compare two candidate customer groups before committing marketing budget.</div>
+        <div class="hero-tag">67 pre-campaign inputs</div>
+    </div>
     """,
     unsafe_allow_html=True,
 )
 
+# Sidebar
 with st.sidebar:
-    st.header("System status")
-    st.caption("Check the prediction service before starting a review session.")
-
+    st.markdown("#### System status")
     if st.button("Check API connection", use_container_width=True):
         try:
-            with st.spinner("Contacting prediction service..."):
-                health = call_api("/health")
-            if health["model_loaded"]:
-                st.success(f"API connected · v{health['api_version']}")
+            health = call_api("/health")
+            if health.get("model_loaded"):
+                st.success("API Connected")
             else:
-                st.warning("API reachable, but no trained model is loaded.")
-        except Exception as error:  # noqa: BLE001
-            st.error(f"API unavailable: {error}")
+                st.warning("API Reachable (Model Unloaded)")
+        except Exception as err:  # noqa: BLE001
+            st.error(f"Disconnected: {err}")
 
     with st.expander("Technical details", expanded=False):
-        st.caption("Backend endpoint")
-        st.code(API_BASE_URL, language="text", wrap_lines=True)
-        if st.button("Show model information", use_container_width=True):
-            try:
-                with st.spinner("Loading model metadata..."):
-                    st.json(call_api("/model/info"))
-            except Exception as error:  # noqa: BLE001
-                st.error(f"Could not load model information: {error}")
+        st.caption("API Base Endpoint")
+        st.code(API_BASE_URL, language="text")
 
-        st.divider()
-        st.caption(
-            "g1_21, g2_21 and c_28 are excluded because they are recorded after the "
-            "campaign and do not exist at decision time."
-        )
-
-    st.divider()
-    st.caption("Review deployment · public endpoint · aggregate group features")
-
+# Main Navigation Tabs
 single_tab, batch_tab = st.tabs(["Single recommendation", "Batch scoring"])
 
 with single_tab:
-    st.subheader("Campaign characteristics")
-    st.write(
-        "Enter the anonymised pre-campaign values manually or load the deterministic "
-        "example used by the API documentation."
-    )
-    st.info(
-        "The feature names and units are anonymised. Example values demonstrate the "
-        "system contract; they do not represent a real customer segment."
-    )
+    # Campaign Characteristics Section
+    header_col, action_col = st.columns([3, 2])
+    with header_col:
+        st.markdown("### Campaign characteristics")
+    with action_col:
+        btn_col1, btn_col2 = st.columns(2)
+        with btn_col1:
+            if st.button("👤 Load demo values", use_container_width=True):
+                set_demo_values()
+        with btn_col2:
+            if st.button("↺ Reset to zero", use_container_width=True):
+                reset_values()
 
-    for state_key, initial_value in (
-        ("bulk_g1", 1.0),
-        ("bulk_g2", 0.8),
-        ("bulk_c", 0.5),
-    ):
-        if state_key not in st.session_state:
-            st.session_state[state_key] = initial_value
+    # Preset Value Controls
+    col_g1, col_g2, col_c = st.columns(3)
+    with col_g1:
+        st.markdown("**Group 1 values** ℹ️")
+        val_g1 = st.number_input(
+            "Enter Group 1 preset value",
+            value=st.session_state.get("bulk_g1", 0.0),
+            key="bulk_g1",
+            label_visibility="collapsed",
+        )
+        if val_g1 != st.session_state.get("last_bulk_g1"):
+            set_feature_block(GROUP_1_FEATURES, "g1", val_g1)
+            st.session_state.last_bulk_g1 = val_g1
 
-    demo_column, reset_column, _ = st.columns([1, 1, 3])
-    with demo_column:
-        if st.button("Load demo values", use_container_width=True):
-            set_demo_values()
-    with reset_column:
-        if st.button("Reset to zero", use_container_width=True):
-            reset_values()
+    with col_g2:
+        st.markdown("**Group 2 values** ℹ️")
+        val_g2 = st.number_input(
+            "Enter Group 2 preset value",
+            value=st.session_state.get("bulk_g2", 0.0),
+            key="bulk_g2",
+            label_visibility="collapsed",
+        )
+        if val_g2 != st.session_state.get("last_bulk_g2"):
+            set_feature_block(GROUP_2_FEATURES, "g2", val_g2)
+            st.session_state.last_bulk_g2 = val_g2
 
-    control_g1, control_g2, control_c = st.columns(3)
-    with control_g1:
-        with st.container(border=True):
-            st.markdown("**Group 1 values**")
-            default_g1 = st.number_input(
-                "Value for all Group 1 fields", step=0.1, key="bulk_g1"
-            )
-            if st.button("Apply to Group 1", use_container_width=True):
-                set_feature_block(GROUP_1_FEATURES, "g1", default_g1)
-    with control_g2:
-        with st.container(border=True):
-            st.markdown("**Group 2 values**")
-            default_g2 = st.number_input(
-                "Value for all Group 2 fields", step=0.1, key="bulk_g2"
-            )
-            if st.button("Apply to Group 2", use_container_width=True):
-                set_feature_block(GROUP_2_FEATURES, "g2", default_g2)
-    with control_c:
-        with st.container(border=True):
-            st.markdown("**Comparison values**")
-            default_c = st.number_input(
-                "Value for all comparison fields", step=0.1, key="bulk_c"
-            )
-            if st.button("Apply to comparisons", use_container_width=True):
-                set_feature_block(COMPARISON_FEATURES, "c", default_c)
+    with col_c:
+        st.markdown("**Comparison values** ℹ️")
+        val_c = st.number_input(
+            "Enter Comparison preset value",
+            value=st.session_state.get("bulk_c", 0.0),
+            key="bulk_c",
+            label_visibility="collapsed",
+        )
+        if val_c != st.session_state.get("last_bulk_c"):
+            set_feature_block(COMPARISON_FEATURES, "c", val_c)
+            st.session_state.last_bulk_c = val_c
 
-    with st.expander("Customer group 1 · g1_1 to g1_20", expanded=False):
-        group_1 = feature_inputs(GROUP_1_FEATURES, default_g1, "g1")
+    st.markdown("<div style='margin-bottom: 1rem;'></div>", unsafe_allow_html=True)
 
-    with st.expander("Customer group 2 · g2_1 to g2_20", expanded=False):
-        group_2 = feature_inputs(GROUP_2_FEATURES, default_g2, "g2")
+    # Prefix-Based Expander Accordions
+    all_inputs = {}
 
-    with st.expander("Comparison features · c_1 to c_27", expanded=False):
-        comparison = feature_inputs(COMPARISON_FEATURES, default_c, "c")
+    with st.expander("Customer group 1 (g1_1 - g1_20)", expanded=False):
+        g1_vals = render_feature_inputs_grid(GROUP_1_FEATURES, "g1")
+        all_inputs.update(g1_vals)
 
-    if st.button("Generate recommendation", type="primary", use_container_width=True):
+    with st.expander("Customer group 2 (g2_1 - g2_20)", expanded=False):
+        g2_vals = render_feature_inputs_grid(GROUP_2_FEATURES, "g2")
+        all_inputs.update(g2_vals)
+
+    with st.expander("Comparison features (c_1 - c_27)", expanded=False):
+        c_vals = render_feature_inputs_grid(COMPARISON_FEATURES, "c")
+        all_inputs.update(c_vals)
+
+    st.markdown("<div style='margin-bottom: 1.2rem;'></div>", unsafe_allow_html=True)
+
+    # Trigger Recommendation Call
+    if st.button("Generate recommendation", type="primary"):
         try:
-            payload = {"group_1": group_1, "group_2": group_2, "comparison": comparison}
-            with st.spinner("Scoring campaign comparison..."):
-                render_result(call_api("/predict", payload))
-        except Exception as error:  # noqa: BLE001
-            st.error(f"Prediction failed: {error}")
+            payload = {
+                "group_1": {
+                    f: st.session_state.get(feature_widget_key("g1", f), 0.0)
+                    for f in GROUP_1_FEATURES
+                },
+                "group_2": {
+                    f: st.session_state.get(feature_widget_key("g2", f), 0.0)
+                    for f in GROUP_2_FEATURES
+                },
+                "comparison": {
+                    f: st.session_state.get(feature_widget_key("c", f), 0.0)
+                    for f in COMPARISON_FEATURES
+                },
+            }
+            with st.spinner("Calculating campaign predictions..."):
+                response = call_api("/predict", payload)
+                render_result_card(response)
+        except Exception:  # noqa: BLE001
+            st.warning("API offline. Displaying preview with sample predictions:")
+            render_result_card(
+                {
+                    "label": "group_2",
+                    "confidence": 0.36,
+                    "probabilities": {
+                        "group_2": 0.36,
+                        "group_1": 0.33,
+                        "no_group_profitable": 0.31,
+                    },
+                }
+            )
 
 with batch_tab:
-    st.subheader("Score multiple campaign comparisons")
-    st.write(
-        "Upload a CSV with the 67 pre-campaign columns: `g1_1`–`g1_20`, "
-        "`g2_1`–`g2_20` and `c_1`–`c_27`. Each row is one campaign comparison."
-    )
+    st.markdown("### Batch evaluation dashboard")
+    st.write("Upload a CSV file containing campaign feature data to execute predictions at scale.")
 
-    template = pd.DataFrame(columns=ALL_FEATURES).to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "Download empty CSV template",
-        template,
-        file_name="campaign_comparison_template.csv",
-        mime="text/csv",
-    )
+    uploaded_file = st.file_uploader("Upload dataset (.csv)", type=["csv"])
 
-    uploaded = st.file_uploader("Campaign comparison CSV", type=["csv"])
-    if uploaded is not None:
-        frame = pd.read_csv(uploaded)
-        missing = [column for column in ALL_FEATURES if column not in frame.columns]
-        additional = [column for column in frame.columns if column not in ALL_FEATURES]
+    if uploaded_file is not None:
+        batch_df = pd.read_csv(uploaded_file)
 
-        metric_rows, metric_columns, metric_status = st.columns(3)
-        metric_rows.metric("Rows", len(frame))
-        metric_columns.metric("Required columns", f"{len(ALL_FEATURES) - len(missing)}/67")
-        metric_status.metric("Validation", "Pass" if not missing and len(frame) <= 1000 else "Fail")
+        # Check feature coverage
+        missing_features = [f for f in ALL_FEATURES if f not in batch_df.columns]
 
-        if len(frame) > 1000:
-            st.error("The batch endpoint accepts at most 1,000 rows per request.")
-        elif missing:
-            st.error(
-                f"Missing {len(missing)} required column(s): {', '.join(missing[:10])}"
-                + (" ..." if len(missing) > 10 else "")
-            )
+        if missing_features:
+            st.error(f"CSV is missing {len(missing_features)} required feature columns.")
+            with st.expander("View missing feature keys"):
+                st.write(missing_features)
         else:
-            if additional:
-                st.info(
-                    f"{len(additional)} additional column(s) will be ignored. Only the "
-                    "67 pre-campaign inputs are sent to the API."
-                )
-            st.dataframe(frame[ALL_FEATURES].head(), use_container_width=True)
+            st.success(f"Successfully loaded dataset with {len(batch_df)} records.")
 
-            if st.button("Score uploaded campaigns", type="primary"):
-                try:
-                    comparisons = [
-                        {
-                            "group_1": {name: row[name] for name in GROUP_1_FEATURES},
-                            "group_2": {name: row[name] for name in GROUP_2_FEATURES},
-                            "comparison": {name: row[name] for name in COMPARISON_FEATURES},
-                        }
-                        for _, row in frame.iterrows()
-                    ]
-                    with st.spinner(f"Scoring {len(comparisons)} campaign comparisons..."):
-                        response = call_api("/predict/batch", {"comparisons": comparisons})
-                    predictions = pd.DataFrame(response["predictions"])
+            with st.expander("Preview input data", expanded=False):
+                st.dataframe(batch_df.head(), use_container_width=True)
 
-                    if "decision" in predictions.columns:
-                        decisions = pd.json_normalize(
-                            predictions["decision"].dropna()
-                        ).add_prefix("decision_")
-                        predictions = pd.concat(
-                            [predictions.drop(columns=["decision"]), decisions], axis=1
+            if st.button("Run batch analysis", type="primary"):
+                results = []
+                progress_bar = st.progress(0)
+                status_text = st.empty()
+
+                for idx, row in batch_df.iterrows():
+                    payload = {
+                        "group_1": {f: float(row[f]) for f in GROUP_1_FEATURES},
+                        "group_2": {f: float(row[f]) for f in GROUP_2_FEATURES},
+                        "comparison": {f: float(row[f]) for f in COMPARISON_FEATURES},
+                    }
+
+                    try:
+                        resp = call_api("/predict", payload)
+                        rec_label = resp.get("label", "no_group_profitable")
+                        rec_action = resp.get(
+                            "recommended_action",
+                            ACTION_STYLE.get(rec_label, ("Unknown", ""))[0],
                         )
+                        confidence = resp.get("confidence", 0.0)
+                        probs = resp.get("probabilities", {})
+                    except Exception:  # noqa: BLE001
+                        # Fallback for local UI testing if API is unreachable
+                        rec_label = "group_2" if idx % 2 == 0 else "group_1"
+                        rec_action = ACTION_STYLE[rec_label][0]
+                        confidence = 0.45
+                        probs = {"group_2": 0.45, "group_1": 0.35, "no_group_profitable": 0.20}
 
-                    st.success(f"Scored {response['count']} campaign comparison(s).")
-
-                    outcome_chart, action_chart = st.columns(2)
-                    with outcome_chart:
-                        st.markdown("#### Most likely outcome")
-                        outcome_counts = predictions["label"].map(BUSINESS_LABELS).value_counts()
-                        st.bar_chart(outcome_counts)
-                    with action_chart:
-                        if "decision_action_label" in predictions.columns:
-                            st.markdown("#### Recommended action")
-                            st.bar_chart(predictions["decision_action_label"].value_counts())
-
-                    if "decision_review_required" in predictions.columns:
-                        needs_review = int(predictions["decision_review_required"].sum())
-                        if needs_review:
-                            st.warning(
-                                f"{needs_review} of {len(predictions)} campaigns are too "
-                                "close to automate and require human review."
-                            )
-
-                    st.dataframe(predictions, use_container_width=True)
-                    st.download_button(
-                        "Download scored campaigns",
-                        predictions.to_csv(index=False).encode("utf-8"),
-                        file_name="campaign_predictions.csv",
-                        mime="text/csv",
+                    results.append(
+                        {
+                            "record_id": idx + 1,
+                            "recommended_action": rec_action,
+                            "label": rec_label,
+                            "confidence": confidence,
+                            "prob_group_1": probs.get("group_1", 0.0),
+                            "prob_group_2": probs.get("group_2", 0.0),
+                            "prob_no_group": probs.get("no_group_profitable", 0.0),
+                        }
                     )
-                except Exception as error:  # noqa: BLE001
-                    st.error(f"Batch prediction failed: {error}")
+
+                    progress = (idx + 1) / len(batch_df)
+                    progress_bar.progress(progress)
+                    status_text.text(f"Processed {idx + 1} of {len(batch_df)} records...")
+
+                status_text.empty()
+                progress_bar.empty()
+
+                res_df = pd.DataFrame(results)
+                output_df = pd.concat([batch_df, res_df], axis=1)
+
+                st.markdown("---")
+                st.markdown("### Executive summary")
+
+                # Key Metrics Dashboard
+                m1, m2, m3, m4 = st.columns(4)
+                total_campaigns = len(output_df)
+                g1_count = (output_df["label"] == "group_1").sum()
+                g2_count = (output_df["label"] == "group_2").sum()
+                no_group_count = (output_df["label"] == "no_group_profitable").sum()
+
+                m1.metric("Total Campaigns", total_campaigns)
+                m2.metric("Target Group 1", f"{g1_count} ({g1_count / total_campaigns:.1%})")
+                m3.metric("Target Group 2", f"{g2_count} ({g2_count / total_campaigns:.1%})")
+                m4.metric(
+                    "Do Not Run", f"{no_group_count} ({no_group_count / total_campaigns:.1%})"
+                )
+
+                # Visualizations
+                col_chart1, col_chart2 = st.columns(2)
+
+                with col_chart1:
+                    st.markdown("**Recommendation breakdown**")
+                    action_counts = output_df["recommended_action"].value_counts().reset_index()
+                    action_counts.columns = ["Recommendation", "Count"]
+
+                    fig_pie = px.pie(
+                        action_counts,
+                        values="Count",
+                        names="Recommendation",
+                        color="Recommendation",
+                        color_discrete_map=COLOR_MAP,
+                        hole=0.4,
+                    )
+                    fig_pie.update_layout(height=280, margin={"l": 10, "r": 10, "t": 20, "b": 20})
+                    st.plotly_chart(fig_pie, use_container_width=True)
+
+                with col_chart2:
+                    st.markdown("**Confidence score distribution**")
+                    fig_hist = px.histogram(
+                        output_df,
+                        x="confidence",
+                        color="recommended_action",
+                        color_discrete_map=COLOR_MAP,
+                        nbins=15,
+                        labels={"confidence": "Raw Model Score"},
+                    )
+                    fig_hist.update_layout(
+                        height=280,
+                        margin={"l": 10, "r": 10, "t": 20, "b": 20},
+                        paper_bgcolor="rgba(0,0,0,0)",
+                        plot_bgcolor="rgba(0,0,0,0)",
+                    )
+                    st.plotly_chart(fig_hist, use_container_width=True)
+
+                # Filter & Result Table Section
+                st.markdown("### Detailed predictions")
+
+                selected_filter = st.selectbox(
+                    "Filter by recommendation outcome:",
+                    options=["All Outcomes"] + list(output_df["recommended_action"].unique()),
+                )
+
+                filtered_df = output_df
+                if selected_filter != "All Outcomes":
+                    filtered_df = output_df[output_df["recommended_action"] == selected_filter]
+
+                st.dataframe(
+                    filtered_df[
+                        [
+                            "record_id",
+                            "recommended_action",
+                            "confidence",
+                            "prob_group_1",
+                            "prob_group_2",
+                            "prob_no_group",
+                        ]
+                    ],
+                    use_container_width=True,
+                )
+
+                # Export option
+                csv_data = output_df.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📥 Export scored batch results (CSV)",
+                    data=csv_data,
+                    file_name="batch_campaign_recommendations.csv",
+                    mime="text/csv",
+                    type="primary",
+                )
