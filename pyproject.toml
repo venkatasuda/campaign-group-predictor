@@ -191,3 +191,7 @@ show_error_codes = true
 # one of them. Excluding the directory is honest; suppressing the rule globally would hide
 # real asserts used for control flow in `src/`.
 exclude_dirs = ["tests", ".venv", "htmlcov"]
+
+
+[tool.ruff.lint]
+ignore = ["E501"]
