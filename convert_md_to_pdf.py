@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 """Convert markdown file to PDF"""
 
+import re
+import sys
+from html.parser import HTMLParser
+from pathlib import Path
+
 import markdown
 from fpdf import FPDF
-from pathlib import Path
-import sys
-import re
-from html.parser import HTMLParser
+
 
 class MarkdownToText(HTMLParser):
     """Simple HTML to text converter for markdown content"""
@@ -34,9 +36,7 @@ class MarkdownToText(HTMLParser):
         elif tag == 'h4':
             self.text.append('\n')
             self.current_heading_level = 4
-        elif tag in ['p', 'li']:
-            self.text.append('\n')
-        elif tag == 'br':
+        elif tag in ['p', 'li'] or tag == 'br':
             self.text.append('\n')
         elif tag == 'code':
             self.in_code = True
@@ -73,7 +73,7 @@ def convert_markdown_to_pdf(md_file_path, output_pdf_path=None):
         return False
     
     # Read markdown file
-    with open(md_file, 'r', encoding='utf-8') as f:
+    with open(md_file, encoding='utf-8') as f:
         md_content = f.read()
     
     # Convert markdown to HTML
