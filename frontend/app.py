@@ -38,13 +38,29 @@ BUSINESS_LABELS = {
     "no_group_profitable": "Neither profitable",
 }
 
+# Keys must match src/constants.py EXACTLY, including the trailing full stops.
+#
+# They previously did not - the map said "Target customer group 1" while the API returns
+# "Target customer group 1." - so plotly silently fell back to its default palette. Nothing
+# errored; the charts simply rendered in colours that meant nothing, with group 1 and group 2
+# in two shades of orange that were hard to tell apart.
+#
+# The colours are chosen to carry meaning rather than to look varied: blue and green for the
+# two actionable choices, red for "do not run", because that is the one that stops spend.
+_ACTION_GROUP_1 = "Target customer group 1."
+_ACTION_GROUP_2 = "Target customer group 2."
+_ACTION_DECLINE = "Do not run this campaign - neither group is expected to be profitable."
+
 COLOR_MAP = {
-    "Target customer group 2": "#00875a",
-    "Group 2": "#00875a",
-    "Target customer group 1": "#0052cc",
+    # Full action strings, as returned by the API
+    _ACTION_GROUP_1: "#0052cc",  # blue
+    _ACTION_GROUP_2: "#00875a",  # green
+    _ACTION_DECLINE: "#de350b",  # red
+    # Short labels, used where the chart axis needs to stay readable
     "Group 1": "#0052cc",
-    "Neither profitable": "#a5adba",
-    "Do not run this campaign": "#de350b",
+    "Group 2": "#00875a",
+    "Neither profitable": "#de350b",
+    "Prediction failed": "#a5adba",  # grey - not an outcome, an absence of one
 }
 
 
@@ -531,51 +547,98 @@ with batch_tab:
                 st.dataframe(batch_df.head(), use_container_width=True)
 
             if st.button("Run batch analysis", type="primary"):
+                # Reset the index before anything else.
+                #
+                # Two bugs lived here, both caused by using the DataFrame's index as if it
+                # were a row position. A CSV with an index column, or any non-sequential
+                # index, produced (a) a progress value above 1.0, which st.progress rejects,
+                # and (b) a concat at the end that aligned on mismatched labels and silently
+                # dropped rows into NaN. `enumerate` gives position; reset_index gives an
+                # index that matches it.
+                batch_df = batch_df.reset_index(drop=True)
+
+                # Scored through /predict/batch in chunks, not row by row.
+                #
+                # The API accepts up to 1,000 comparisons per call. Sending them individually
+                # turned a 6,620-row file into 6,620 sequential HTTP round trips - roughly
+                # nine minutes of waiting, and 6,620 chances for one timeout to matter. In
+                # chunks it is seven calls.
+                #
+                # CHUNK_SIZE is 500 rather than the 1,000 the API permits: a smaller chunk
+                # keeps the progress bar informative and limits how much work is lost if one
+                # call fails.
+                CHUNK_SIZE = 500
+
                 results = []
+                failures = 0
                 progress_bar = st.progress(0)
                 status_text = st.empty()
 
-                for idx, row in batch_df.iterrows():
-                    payload = {
-                        "group_1": {f: float(row[f]) for f in GROUP_1_FEATURES},
-                        "group_2": {f: float(row[f]) for f in GROUP_2_FEATURES},
-                        "comparison": {f: float(row[f]) for f in COMPARISON_FEATURES},
-                    }
+                for start in range(0, len(batch_df), CHUNK_SIZE):
+                    chunk = batch_df.iloc[start : start + CHUNK_SIZE]
+
+                    comparisons = [
+                        {
+                            "group_1": {f: float(row[f]) for f in GROUP_1_FEATURES},
+                            "group_2": {f: float(row[f]) for f in GROUP_2_FEATURES},
+                            "comparison": {f: float(row[f]) for f in COMPARISON_FEATURES},
+                        }
+                        for _, row in chunk.iterrows()
+                    ]
 
                     try:
-                        resp = call_api("/predict", payload)
-                        rec_label = resp.get("label", "no_group_profitable")
-                        rec_action = resp.get(
-                            "recommended_action",
-                            ACTION_STYLE.get(rec_label, ("Unknown", ""))[0],
-                        )
-                        confidence = resp.get("confidence", 0.0)
-                        probs = resp.get("probabilities", {})
+                        resp = call_api("/predict/batch", {"comparisons": comparisons})
+                        predictions = resp.get("predictions", [])
                     except Exception:  # noqa: BLE001
-                        # Fallback for local UI testing if API is unreachable
-                        rec_label = "group_2" if idx % 2 == 0 else "group_1"
-                        rec_action = ACTION_STYLE[rec_label][0]
-                        confidence = 0.45
-                        probs = {"group_2": 0.45, "group_1": 0.35, "no_group_profitable": 0.20}
+                        # A failed chunk is recorded as failed. It is NOT replaced with
+                        # invented predictions - the previous version alternated between
+                        # group_1 and group_2 at a fixed 0.45 confidence, which is
+                        # indistinguishable from a real result on screen. A dashboard that
+                        # fabricates recommendations when the backend is unreachable is worse
+                        # than one that reports the outage.
+                        predictions = []
 
-                    results.append(
-                        {
-                            "record_id": idx + 1,
-                            "recommended_action": rec_action,
-                            "label": rec_label,
-                            "confidence": confidence,
-                            "prob_group_1": probs.get("group_1", 0.0),
-                            "prob_group_2": probs.get("group_2", 0.0),
-                            "prob_no_group": probs.get("no_group_profitable", 0.0),
-                        }
-                    )
+                    for offset in range(len(chunk)):
+                        if offset < len(predictions):
+                            item = predictions[offset]
+                            rec_label = item.get("label", "no_group_profitable")
+                            rec_action = item.get(
+                                "recommended_action",
+                                ACTION_STYLE.get(rec_label, ("Unknown", ""))[0],
+                            )
+                            confidence = item.get("confidence", 0.0)
+                            probs = item.get("probabilities", {})
+                        else:
+                            failures += 1
+                            rec_label = "error"
+                            rec_action = "Prediction failed"
+                            confidence = 0.0
+                            probs = {}
 
-                    progress = (idx + 1) / len(batch_df)
-                    progress_bar.progress(progress)
-                    status_text.text(f"Processed {idx + 1} of {len(batch_df)} records...")
+                        results.append(
+                            {
+                                "record_id": start + offset + 1,
+                                "recommended_action": rec_action,
+                                "label": rec_label,
+                                "confidence": confidence,
+                                "prob_group_1": probs.get("group_1", 0.0),
+                                "prob_group_2": probs.get("group_2", 0.0),
+                                "prob_no_group": probs.get("no_group_profitable", 0.0),
+                            }
+                        )
+
+                    done = min(start + CHUNK_SIZE, len(batch_df))
+                    progress_bar.progress(done / len(batch_df))
+                    status_text.text(f"Scored {done:,} of {len(batch_df):,} records...")
 
                 status_text.empty()
                 progress_bar.empty()
+
+                if failures:
+                    st.warning(
+                        f"{failures} of {len(batch_df)} records could not be scored — the API "
+                        "did not respond. Those rows are marked 'Prediction failed' below."
+                    )
 
                 res_df = pd.DataFrame(results)
                 output_df = pd.concat([batch_df, res_df], axis=1)
